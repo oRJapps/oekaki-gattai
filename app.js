@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, TOPICS, pick } from './topics.js';
-import { AI_DRAWINGS, aiTopics } from './ai.js';
-import { Pad, makeLayout, pickLayout, drawLayoutPreview, LAYOUT_NAMES, animateReveal } from './draw.js';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js';
-import { createIdentity, idOf, importKey, verify } from './sec.js';
-import { makeCard } from './card.js';
-import * as net from './net.js';
+import { LEVELS, TOPICS, pick } from './topics.js?v=20261114133805';
+import { AI_DRAWINGS, aiTopics } from './ai.js?v=20261114133805';
+import { Pad, makeLayout, pickLayout, drawLayoutPreview, LAYOUT_NAMES, animateReveal } from './draw.js?v=20261114133805';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261114133805';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261114133805';
+import { makeCard } from './card.js?v=20261114133805';
+import * as net from './net.js?v=20261114133805';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -741,9 +741,16 @@ function revealScreen() {
   const caption = h('p', { class: 'chips', id: 'caption' },
     r.owners.map((name, i) => h('span', { class: 'chip', style: `--seat:${r.solo ? (name === 'AI' ? '#b9c2e6' : SEATS[0].color) : SEATS[i % SEATS.length].color}` },
       h('i', { class: 'dot' }), `${G.regions[i].label}：${name}`)));
+  // Xでシェア：お題とハッシュタグとサイトのURLを入れる（なまえは入れない）
+  const SHARE_TEXT = `お題「${r.topic}」を分けて描いて合体したら、こうなった。\n#お絵かき合体`;
+  const X_POST_URL = 'https://x.com/intent/post?text=' + encodeURIComponent(SHARE_TEXT + '\n') + '&url=' + encodeURIComponent(SITE_URL);
+  let cardBlob = null; // シェア用の画像。合体が終わったら先に作っておく
   const buttons = h('div', { class: 'actions' },
     h('button', { class: 'btn', onclick: saveImage }, icon('save'), '画像を保存'),
-    h('button', { class: 'btn share', id: 'share-btn', onclick: shareResult }, icon('x'), 'Xでシェア'),
+    // パソコン：ふつうのリンク（押せば必ず X の投稿画面が開く）。スマホ：共有の一覧を出すボタン
+    IS_PHONE
+      ? h('button', { class: 'btn share', id: 'share-btn', onclick: sharePhone }, icon('x'), 'Xでシェア')
+      : h('a', { class: 'btn share', id: 'share-btn', href: X_POST_URL, target: '_blank', rel: 'noopener noreferrer', onclick: copyForX }, icon('x'), 'Xでシェア'),
     h('button', { class: 'btn primary', id: 'again-btn', onclick: () => { stopReveal(); if (r.solo) startSolo(); else lobbyScreen(); } }, icon('again'), 'もう一回'),
     h('button', { class: 'btn ghost', onclick: () => { stopReveal(); if (!r.solo) leaveRoom(); titleScreen(); } }, icon('home'), 'やめる'));
   const easel = h('div', { class: 'easel' }, canvas);
@@ -755,41 +762,39 @@ function revealScreen() {
     easel.classList.add('flash');
     sfx('fanfare');
     confetti();
+    makeBlob().then((blob) => { cardBlob = blob; }).catch(() => {});
   });
 
-  // Xでシェア。お題とハッシュタグとサイトのURLを入れる（なまえは入れない）
-  async function shareResult() {
-    const text = `お題「${r.topic}」を分けて描いて合体したら、こうなった。\n#お絵かき合体`;
-    let blob = null;
+  // スマホ・タブレット：絵の画像つきで共有する（出てきた一覧から X をえらぶ）
+  async function sharePhone() {
     try {
-      const card = await resultCard();
-      blob = await new Promise((resolve) => card.toBlob(resolve, 'image/png'));
-    } catch (err) { /* 画像が作れなくても、文だけでシェアできる */ }
-
-    // スマホ・タブレットだけ：絵の画像つきで共有する（出てきた一覧から X をえらぶ）。
-    // パソコンでこれを使うと Windows の共有の画面が出てしまい、X に行かないので使わない
-    if (IS_PHONE && blob) {
-      try {
-        const file = new File([blob], 'oekaki-gattai.png', { type: 'image/png' });
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], text: `${text}\n${SITE_URL}` });
-          return;
-        }
-      } catch (err) {
-        if (err && err.name === 'AbortError') return; // 共有をやめた
+      const blob = cardBlob || await makeBlob();
+      const file = new File([blob], 'oekaki-gattai.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text: `${SHARE_TEXT}\n${SITE_URL}` });
+        return;
       }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return; // 共有をやめた
     }
+    window.open(X_POST_URL, '_blank', 'noopener,noreferrer'); // 共有の一覧が使えないときは X を開く
+  }
 
-    // パソコン：絵をクリップボードにコピーしてから、X の投稿画面を開く（投稿画面で Ctrl+V を押すと絵が貼れる）
+  // パソコン：リンクが X の投稿画面を開く。そのとき、絵をクリップボードにコピーしておく
+  // （投稿画面で Ctrl+V を押すと絵が貼れる）。コピーできなくても、X は開く
+  function copyForX() {
     let copied = false;
     try {
-      if (blob && navigator.clipboard && window.ClipboardItem) {
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      if (cardBlob && navigator.clipboard && window.ClipboardItem) {
+        navigator.clipboard.write([new ClipboardItem({ 'image/png': cardBlob })]).catch(() => {});
         copied = true;
       }
-    } catch (err) { /* コピーできないブラウザでは、保存して貼ってもらう */ }
-    window.open('https://x.com/intent/post?text=' + encodeURIComponent(text + '\n') + '&url=' + encodeURIComponent(SITE_URL), '_blank', 'noopener,noreferrer');
+    } catch (err) { /* コピーできないブラウザ */ }
     toast(copied ? '絵をコピーしました。Xの投稿画面で Ctrl+V を押すと貼れます' : '絵をつけるときは「画像を保存」してから貼ってね');
+  }
+
+  function makeBlob() {
+    return resultCard().then((card) => new Promise((resolve) => card.toBlob(resolve, 'image/png')));
   }
 
   // 保存・シェアする画像：絵に、ゲームの背景・タイトル・お題・描いた人をつけたもの（card.js）

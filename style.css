@@ -285,4 +285,4 @@ button { font-family: var(--body); cursor: pointer; -webkit-tap-highlight-color:
 .copyright a:hover { color: #fff; }
 
 /* Xでシェア */
-.btn.share { background: #000; color: #fff; }
+.btn.share { background: #000; color: #fff; text-decoration: none; }

@@ -12,7 +12,7 @@
 //   join(roomId, state, on)    部屋に入る。on.presence(一覧) と on.event(種類, 中身) が呼ばれる
 //                              戻り値：{ send(種類, 中身), update(自分の状態), leave() }
 
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261114133805';
 
 export const online = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
 
@@ -25,7 +25,7 @@ async function client() {
     if (!window.supabase) {
       await new Promise((resolve, reject) => {
         const tag = document.createElement('script');
-        tag.src = 'vendor/supabase.js';
+        tag.src = 'vendor/supabase.js?v=20261114133805';
         tag.onload = resolve;
         tag.onerror = () => reject(new Error('通信の部品を読みこめませんでした'));
         document.head.append(tag);
