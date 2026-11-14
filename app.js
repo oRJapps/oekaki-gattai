@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, TOPICS, pick } from './topics.js?v=20261114133805';
-import { AI_DRAWINGS, aiTopics } from './ai.js?v=20261114133805';
-import { Pad, makeLayout, pickLayout, drawLayoutPreview, LAYOUT_NAMES, animateReveal } from './draw.js?v=20261114133805';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261114133805';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261114133805';
-import { makeCard } from './card.js?v=20261114133805';
-import * as net from './net.js?v=20261114133805';
+import { LEVELS, TOPICS, pick } from './topics.js?v=20261114135104';
+import { AI_DRAWINGS, aiTopics } from './ai.js?v=20261114135104';
+import { Pad, makeLayout, pickLayout, drawLayoutPreview, LAYOUT_NAMES, animateReveal } from './draw.js?v=20261114135104';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261114135104';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261114135104';
+import { makeCard } from './card.js?v=20261114135104';
+import * as net from './net.js?v=20261114135104';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -747,10 +747,8 @@ function revealScreen() {
   let cardBlob = null; // シェア用の画像。合体が終わったら先に作っておく
   const buttons = h('div', { class: 'actions' },
     h('button', { class: 'btn', onclick: saveImage }, icon('save'), '画像を保存'),
-    // パソコン：ふつうのリンク（押せば必ず X の投稿画面が開く）。スマホ：共有の一覧を出すボタン
-    IS_PHONE
-      ? h('button', { class: 'btn share', id: 'share-btn', onclick: sharePhone }, icon('x'), 'Xでシェア')
-      : h('a', { class: 'btn share', id: 'share-btn', href: X_POST_URL, target: '_blank', rel: 'noopener noreferrer', onclick: copyForX }, icon('x'), 'Xでシェア'),
+    // スマホ：共有の一覧を出す（絵つき）。パソコン：手順の窓を出す（絵をコピー → X を開く → 貼りつけ）
+    h('button', { class: 'btn share', id: 'share-btn', onclick: IS_PHONE ? sharePhone : openShareDialog }, icon('x'), 'Xでシェア'),
     h('button', { class: 'btn primary', id: 'again-btn', onclick: () => { stopReveal(); if (r.solo) startSolo(); else lobbyScreen(); } }, icon('again'), 'もう一回'),
     h('button', { class: 'btn ghost', onclick: () => { stopReveal(); if (!r.solo) leaveRoom(); titleScreen(); } }, icon('home'), 'やめる'));
   const easel = h('div', { class: 'easel' }, canvas);
@@ -780,17 +778,47 @@ function revealScreen() {
     window.open(X_POST_URL, '_blank', 'noopener,noreferrer'); // 共有の一覧が使えないときは X を開く
   }
 
-  // パソコン：リンクが X の投稿画面を開く。そのとき、絵をクリップボードにコピーしておく
-  // （投稿画面で Ctrl+V を押すと絵が貼れる）。コピーできなくても、X は開く
-  function copyForX() {
-    let copied = false;
-    try {
-      if (cardBlob && navigator.clipboard && window.ClipboardItem) {
-        navigator.clipboard.write([new ClipboardItem({ 'image/png': cardBlob })]).catch(() => {});
-        copied = true;
+  // パソコン：X の投稿用リンクには絵をつけられない（X の決まり）。
+  // そこで、絵をクリップボードにコピーしてから X を開き、投稿画面で貼りつけてもらう。
+  // 手順が分かるように、3つのステップを書いた窓を出す
+  function openShareDialog() {
+    const dlg = h('dialog', { class: 'share-dialog', 'aria-label': 'Xでシェア' });
+    const state = h('p', { class: 'step-state', role: 'status' }, '絵をコピーしています…');
+    const img = h('img', { class: 'share-preview', alt: 'シェアする絵' });
+    const blobReady = cardBlob ? Promise.resolve(cardBlob) : makeBlob();
+    blobReady.then((blob) => { img.src = URL.createObjectURL(blob); }).catch(() => {});
+
+    const copy = async () => {
+      try {
+        if (!navigator.clipboard || !window.ClipboardItem) throw new Error('unsupported');
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': cardBlob || blobReady })]);
+        state.textContent = '絵をコピーしました';
+        state.className = 'step-state ok';
+      } catch (err) {
+        state.textContent = 'コピーできませんでした。「画像を保存」を押して、Xの投稿画面でその画像をえらんでください';
+        state.className = 'step-state ng';
       }
-    } catch (err) { /* コピーできないブラウザ */ }
-    toast(copied ? '絵をコピーしました。Xの投稿画面で Ctrl+V を押すと貼れます' : '絵をつけるときは「画像を保存」してから貼ってね');
+    };
+    const pasteKey = /Mac/i.test(navigator.userAgent) ? '⌘（コマンド）+ V' : 'Ctrl + V';
+
+    dlg.append(
+      h('h3', {}, 'Xでシェア'),
+      img,
+      h('ol', { class: 'steps' },
+        h('li', {}, h('b', {}, '絵をコピーする'), state,
+          h('span', { class: 'toolrow' },
+            h('button', { class: 'tool', onclick: copy }, icon('copy'), 'もう一度コピー'),
+            h('button', { class: 'tool', onclick: saveImage }, icon('save'), '画像を保存'))),
+        h('li', {}, h('b', {}, 'Xの投稿画面を開く'),
+          h('a', { class: 'btn share', id: 'open-x', href: X_POST_URL, target: '_blank', rel: 'noopener noreferrer' }, icon('x'), 'Xを開く')),
+        h('li', {}, h('b', {}, `投稿画面で ${pasteKey} を押す`),
+          h('p', { class: 'note' }, '絵が貼りつきます。そのまま投稿してください'))),
+      h('button', { class: 'btn ghost', onclick: () => dlg.close() }, 'とじる'),
+    );
+    dlg.addEventListener('close', () => { if (img.src) URL.revokeObjectURL(img.src); dlg.remove(); });
+    document.body.append(dlg);
+    dlg.showModal();
+    copy(); // 窓を開いたときに、まず1回コピーする
   }
 
   function makeBlob() {
