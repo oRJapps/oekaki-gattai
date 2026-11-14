@@ -17,6 +17,7 @@ const params = new URLSearchParams(location.search);
 // 描く時間は180秒。確認用に ?sec=10 のように短くできる
 const DRAW_SECONDS = Math.max(5, parseInt(params.get('sec'), 10) || 180);
 const INTRO_MS = 4000;
+const SITE_URL = 'https://orjapps.github.io/oekaki-gattai/'; // シェアするときに入れる公開先
 const MAX_PLAYERS = 4;
 const SEATS = [
   { name: '赤', color: '#ff5252' }, { name: '青', color: '#3ec5ff' },
@@ -49,6 +50,7 @@ const ICONS = {
   undo: '<path d="M8 6 4 10l4 4"/><path d="M4 10h10a5 5 0 0 1 0 10h-3"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
   save: '<path d="M12 3v12M7 10l5 5 5-5M4 20h16"/>',
+  x: '<path d="M4 4l16 16M20 4L4 20"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
   soundOn: '<path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
   soundOff: '<path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M17 9.5l5 5M22 9.5l-5 5"/>',
@@ -738,6 +740,7 @@ function revealScreen() {
       h('i', { class: 'dot' }), `${G.regions[i].label}：${name}`)));
   const buttons = h('div', { class: 'actions' },
     h('button', { class: 'btn', onclick: saveImage }, icon('save'), '画像を保存'),
+    h('button', { class: 'btn share', id: 'share-btn', onclick: shareResult }, icon('x'), 'Xでシェア'),
     h('button', { class: 'btn primary', id: 'again-btn', onclick: () => { stopReveal(); if (r.solo) startSolo(); else lobbyScreen(); } }, icon('again'), 'もう一回'),
     h('button', { class: 'btn ghost', onclick: () => { stopReveal(); if (!r.solo) leaveRoom(); titleScreen(); } }, icon('home'), 'やめる'));
   const easel = h('div', { class: 'easel' }, canvas);
@@ -750,6 +753,24 @@ function revealScreen() {
     sfx('fanfare');
     confetti();
   });
+
+  // Xでシェア。お題とハッシュタグとサイトのURLを入れる（なまえは入れない）
+  async function shareResult() {
+    const text = `お題「${r.topic}」を分けて描いて合体したら、こうなった。\n#お絵かき合体`;
+    // スマホなど：絵の画像つきで共有する（出てきた一覧から X をえらぶ）
+    try {
+      const file = new File([await G.reveal.toBlob()], 'oekaki-gattai.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text: `${text}\n${SITE_URL}` });
+        return;
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return; // 共有をやめた
+    }
+    // パソコンなど：X の投稿画面を開く。画像は自動ではつかないので、保存してから貼ってもらう
+    window.open('https://x.com/intent/post?text=' + encodeURIComponent(text + '\n') + '&url=' + encodeURIComponent(SITE_URL), '_blank', 'noopener,noreferrer');
+    toast('絵をつけるときは「画像を保存」してから貼ってね');
+  }
 
   function saveImage() {
     const a = h('a', { href: G.reveal.toPNG(), download: `oekaki-${r.topic}.png` });

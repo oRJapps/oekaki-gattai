@@ -339,5 +339,12 @@ export function animateReveal(canvas, parts, regions, onDone) {
     stop() { stopped = true; clearTimeout(timer); },
     // 保存用：区切り線なしの画像
     toPNG() { compose(false); const url = canvas.toDataURL('image/png'); compose(true); return url; },
+    // 共有用：区切り線なしの画像ファイルの中身
+    toBlob() {
+      return new Promise((resolve) => {
+        compose(false);
+        canvas.toBlob((blob) => { compose(true); resolve(blob); }, 'image/png');
+      });
+    },
   };
 }
