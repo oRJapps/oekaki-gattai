@@ -19,6 +19,8 @@ const params = new URLSearchParams(location.search);
 const DRAW_SECONDS = Math.max(5, parseInt(params.get('sec'), 10) || 180);
 const INTRO_MS = 4000;
 const SITE_URL = 'https://orjapps.github.io/oekaki-gattai/'; // シェアするときに入れる公開先
+// スマホかタブレットなら true（iPad は Mac と名のるので、タッチできるかどうかも見る）
+const IS_PHONE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 const MAX_PLAYERS = 4;
 const SEATS = [
   { name: '赤', color: '#ff5252' }, { name: '青', color: '#3ec5ff' },
@@ -758,21 +760,36 @@ function revealScreen() {
   // Xでシェア。お題とハッシュタグとサイトのURLを入れる（なまえは入れない）
   async function shareResult() {
     const text = `お題「${r.topic}」を分けて描いて合体したら、こうなった。\n#お絵かき合体`;
-    // スマホなど：絵の画像つきで共有する（出てきた一覧から X をえらぶ）
+    let blob = null;
     try {
       const card = await resultCard();
-      const blob = await new Promise((resolve) => card.toBlob(resolve, 'image/png'));
-      const file = new File([blob], 'oekaki-gattai.png', { type: 'image/png' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], text: `${text}\n${SITE_URL}` });
-        return;
+      blob = await new Promise((resolve) => card.toBlob(resolve, 'image/png'));
+    } catch (err) { /* 画像が作れなくても、文だけでシェアできる */ }
+
+    // スマホ・タブレットだけ：絵の画像つきで共有する（出てきた一覧から X をえらぶ）。
+    // パソコンでこれを使うと Windows の共有の画面が出てしまい、X に行かないので使わない
+    if (IS_PHONE && blob) {
+      try {
+        const file = new File([blob], 'oekaki-gattai.png', { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], text: `${text}\n${SITE_URL}` });
+          return;
+        }
+      } catch (err) {
+        if (err && err.name === 'AbortError') return; // 共有をやめた
       }
-    } catch (err) {
-      if (err && err.name === 'AbortError') return; // 共有をやめた
     }
-    // パソコンなど：X の投稿画面を開く。画像は自動ではつかないので、保存してから貼ってもらう
+
+    // パソコン：絵をクリップボードにコピーしてから、X の投稿画面を開く（投稿画面で Ctrl+V を押すと絵が貼れる）
+    let copied = false;
+    try {
+      if (blob && navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        copied = true;
+      }
+    } catch (err) { /* コピーできないブラウザでは、保存して貼ってもらう */ }
     window.open('https://x.com/intent/post?text=' + encodeURIComponent(text + '\n') + '&url=' + encodeURIComponent(SITE_URL), '_blank', 'noopener,noreferrer');
-    toast('絵をつけるときは「画像を保存」してから貼ってね');
+    toast(copied ? '絵をコピーしました。Xの投稿画面で Ctrl+V を押すと貼れます' : '絵をつけるときは「画像を保存」してから貼ってね');
   }
 
   // 保存・シェアする画像：絵に、ゲームの背景・タイトル・お題・描いた人をつけたもの（card.js）
