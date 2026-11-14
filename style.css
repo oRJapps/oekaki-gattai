@@ -281,3 +281,5 @@ button { font-family: var(--body); cursor: pointer; -webkit-tap-highlight-color:
 
 /* 著作権表示（どの画面でもいちばん下） */
 .copyright { position: relative; z-index: 1; text-align: center; padding: 14px 16px 18px; color: var(--sub); font-size: 13px; letter-spacing: .04em; }
+.copyright a { color: var(--gold); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; padding: 6px 2px; }
+.copyright a:hover { color: #fff; }
