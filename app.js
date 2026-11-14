@@ -10,6 +10,7 @@ import { AI_DRAWINGS, aiTopics } from './ai.js';
 import { Pad, makeLayout, pickLayout, drawLayoutPreview, LAYOUT_NAMES, animateReveal } from './draw.js';
 import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js';
 import { createIdentity, idOf, importKey, verify } from './sec.js';
+import { makeCard } from './card.js';
 import * as net from './net.js';
 
 const $app = document.getElementById('app');
@@ -759,7 +760,9 @@ function revealScreen() {
     const text = `お題「${r.topic}」を分けて描いて合体したら、こうなった。\n#お絵かき合体`;
     // スマホなど：絵の画像つきで共有する（出てきた一覧から X をえらぶ）
     try {
-      const file = new File([await G.reveal.toBlob()], 'oekaki-gattai.png', { type: 'image/png' });
+      const card = await resultCard();
+      const blob = await new Promise((resolve) => card.toBlob(resolve, 'image/png'));
+      const file = new File([blob], 'oekaki-gattai.png', { type: 'image/png' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], text: `${text}\n${SITE_URL}` });
         return;
@@ -772,8 +775,17 @@ function revealScreen() {
     toast('絵をつけるときは「画像を保存」してから貼ってね');
   }
 
-  function saveImage() {
-    const a = h('a', { href: G.reveal.toPNG(), download: `oekaki-${r.topic}.png` });
+  // 保存・シェアする画像：絵に、ゲームの背景・タイトル・お題・描いた人をつけたもの（card.js）
+  function resultCard() {
+    return makeCard(G.reveal.toCanvas(), r.topic, r.owners.map((name, i) => ({
+      text: `${G.regions[i].label}：${name}`,
+      color: r.solo ? (name === 'AI' ? '#b9c2e6' : SEATS[0].color) : SEATS[i % SEATS.length].color,
+    })));
+  }
+
+  async function saveImage() {
+    const card = await resultCard();
+    const a = h('a', { href: card.toDataURL('image/png'), download: `oekaki-gattai-${r.topic}.png` });
     document.body.append(a);
     a.click();
     a.remove();

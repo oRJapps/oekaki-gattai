@@ -73,6 +73,8 @@ python -m http.server 5173 --directory oekaki-web
 - `sec.js`：なりすまし対策（鍵のペアと署名）
 - `vendor/supabase.js`：通信の部品（supabase-js 2.45.4 をそのまま置いたもの）
 - `fx.js`：効果音、紙ふぶき、らくがきが流れる背景
+- `card.js`：保存・シェアする画像（絵に背景・タイトル・お題・描いた人をつける）
+- `ogp.png`：URL を貼ったときに出る紹介カードの画像（`tools/make_ogp.py` で作る）
 - `style.css`：見た目（色、ボタン、アニメーション）
 - `ai.js`：シングルでAIが描く絵（14種類）
 - `topics.js`：難易度とお題

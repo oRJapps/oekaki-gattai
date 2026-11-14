@@ -337,7 +337,15 @@ export function animateReveal(canvas, parts, regions, onDone) {
 
   return {
     stop() { stopped = true; clearTimeout(timer); },
-    // 保存用：区切り線なしの画像
+    // 保存・シェア用：区切り線なしの絵を、別のキャンバスに写して返す
+    toCanvas() {
+      compose(false);
+      const copy = newLayer();
+      copy.getContext('2d').drawImage(canvas, 0, 0);
+      compose(true);
+      return copy;
+    },
+    // 区切り線なしの絵だけ（背景なし）
     toPNG() { compose(false); const url = canvas.toDataURL('image/png'); compose(true); return url; },
     // 共有用：区切り線なしの画像ファイルの中身
     toBlob() {
