@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116192432';
-import { loadSample } from './samples.js?v=20261116192432';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116192432';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116192432';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116192432';
-import { makeCard } from './card.js?v=20261116192432';
-import * as net from './net.js?v=20261116192432';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116193116';
+import { loadSample } from './samples.js?v=20261116193116';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116193116';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116193116';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116193116';
+import { makeCard } from './card.js?v=20261116193116';
+import * as net from './net.js?v=20261116193116';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -847,17 +847,18 @@ function revealScreen() {
   const scoreBox = h('div', { class: 'scorebox', id: 'scorebox', hidden: true },
     h('small', { id: 'score-label' }, 'そっくり度'), h('span', { class: 'points' }, scoreNum, '点'), rank);
   // 見本（おてほん）。合体が終わったら、絵の左上に出す
-  // 絵のファイルは、ここで読みこむ（合体のアニメーションの間に読み終わる）。組み合わせお題では、もとのお題の見本を出す
-  const base = (parseTopic(r.topic) || { base: r.topic }).base;
+  // 絵のファイルは、ここで読みこむ（合体のアニメーションの間に読み終わる）。組み合わせお題では、ことばに合った飾りをつけた見本を出す
+  const parsed = parseTopic(r.topic) || { base: r.topic, mod: '' };
+  const base = parsed.base;
   const sampleCv = h('canvas', {});
   let sampleReady = false;
   let scoreLabel = 'そっくり度', sampleOpsAll = null;
-  const sampleLoaded = loadSample(base, sampleFile(base), sampleFlip(base)).then((ops) => {
+  const sampleLoaded = loadSample(base, sampleFile(base), sampleFlip(base), parsed.mod, topicDir(base) === '左向き').then((ops) => {
     if (ops) { drawSample(sampleCv, ops, 300); sampleReady = true; sampleOpsAll = ops; }
     return ops;
   });
   // 押すと大きくなる（もう一度押すと小さくなる）
-  const sampleBox = h('figure', { class: 'sample', id: 'sample', hidden: true, title: '押すと大きくなる', onclick: (e) => e.currentTarget.classList.toggle('big') }, sampleCv, h('figcaption', {}, base === r.topic ? 'おてほん' : `おてほん（${base}）`));
+  const sampleBox = h('figure', { class: 'sample', id: 'sample', hidden: true, title: '押すと大きくなる', onclick: (e) => e.currentTarget.classList.toggle('big') }, sampleCv, h('figcaption', {}, 'おてほん'));
 
   let finalScore = null;
   // Xでシェア：お題と点数とハッシュタグとサイトのURLを入れる（なまえは入れない）

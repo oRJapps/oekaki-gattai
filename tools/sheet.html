@@ -9,10 +9,11 @@ const q = new URLSearchParams(location.search), t = Date.now();
 const { topicsInFile } = await import('../topics.js?t=' + t);
 const { loadSample } = await import('../samples.js?t=' + t);
 const { drawSample } = await import('../draw.js?t=' + t);
-const file = q.get('f') || 'base', from = +q.get('from') || 0;
+const { topicDir, sampleFlip } = await import('../topics.js?t=' + t);
+const file = q.get('f') || 'base', from = +q.get('from') || 0, mod = q.get('m') || ''; // m = 組み合わせのことば（確認用）
 for (const name of topicsInFile(file).slice(from, from + 20)) {
   const cv = document.createElement('canvas'), fig = document.createElement('figure'), cap = document.createElement('figcaption');
-  const ops = await loadSample(name, file);
+  const ops = await loadSample(name, file, sampleFlip(name), mod, topicDir(name) === '左向き');
   if (ops) drawSample(cv, ops, 316);
   cap.textContent = name + (ops ? '' : '（なし）');
   fig.append(cv, cap);

@@ -1,0 +1,214 @@
+// samples/mods.js
+// 組み合わせお題（「リボンを付けたネコ」など）の見本を作る。
+// もとの見本の絵に、ことばに合った飾り（帽子、リボン、風船、雪など）を描き足す。
+// 道具（k）は samples.js からわたされる。使い方：decorate(もとの絵, ことば, もとのお題, 左向きかどうか)
+
+export default (k) => {
+  const { RED, DRED, ORANGE, DORANGE, YELLOW, GOLD, DGOLD, GREEN, DGREEN, LGREEN, BLUE, DBLUE, SKY, NAVY, PINK, DPINK, BROWN, DBROWN, TAN, CREAM, WHITE, GRAY, LGRAY, DGRAY, BLACK, PURPLE, INK,
+    fillOp, lineOp, ellPts, smooth, shape, E, C, P, D, L, Q, A, T, R, dome, rays, wheel, flower, leaf, eyes, sitBody, muzzle, quad } = k;
+  const pol = (cx, cy, r, deg) => [cx + r * Math.cos(deg * Math.PI / 180), cy + r * Math.sin(deg * Math.PI / 180)];
+  const SNOW = '#9aa5ab', ICE = '#7fb8d6';
+  const flat = (list) => list.flat(Infinity).filter(Boolean);
+
+  // 動物の頭の位置：[まんなかの x, まんなかの y, 半径]。見本の絵（左右を直したあと）の座標
+  const HEADS = {
+    '魚': [250, 470, 110], 'ヒヨコ': [440, 370, 165], 'ヘビ': [195, 345, 70], 'ネコ': [500, 345, 190], 'ウサギ': [500, 440, 165], 'イヌ': [500, 355, 185], 'カエル': [500, 480, 170],
+    'ペンギン': [500, 260, 150], 'ゾウ': [305, 420, 165], 'キリン': [290, 265, 90], '恐竜': [265, 340, 110], 'ライオン': [500, 370, 215], 'ドラゴン': [240, 320, 100], 'クジャク': [500, 420, 52],
+    'かたつむり': [210, 500, 90], 'てんとう虫': [500, 270, 140], 'ちょうちょ': [500, 345, 60], 'クラゲ': [500, 330, 250], 'タコ': [500, 370, 250], 'イカ': [500, 300, 140], 'ヒトデ': [500, 520, 160],
+    'カニ': [500, 540, 220], 'ミツバチ': [250, 540, 115], 'カメ': [190, 520, 90], '金魚': [250, 500, 130], 'おたまじゃくし': [340, 500, 190],
+    'ブタ': [300, 480, 150], 'ウシ': [265, 460, 150], 'ヒツジ': [295, 480, 110], 'クマ': [500, 345, 190], 'パンダ': [500, 345, 190], 'サル': [500, 345, 190], 'キツネ': [500, 350, 185], 'タヌキ': [500, 345, 195],
+    'リス': [395, 410, 130], 'ネズミ': [290, 570, 140], 'ハムスター': [500, 400, 230], 'コアラ': [500, 345, 195], 'ニワトリ': [350, 370, 115], 'アヒル': [370, 290, 120], 'フクロウ': [500, 360, 210],
+    'ハト': [345, 320, 100], 'イルカ': [220, 480, 110], 'クジラ': [230, 470, 160], 'サメ': [200, 480, 120], 'アザラシ': [260, 460, 120], 'カバ': [270, 480, 170], 'ハリネズミ': [260, 640, 120], 'コウモリ': [500, 330, 120],
+    'カブトムシ': [330, 470, 90], 'クワガタ': [500, 310, 110], 'トンボ': [500, 280, 70], 'セミ': [500, 250, 150], 'バッタ': [290, 540, 95], 'ラッコ': [250, 500, 130], 'フラミンゴ': [340, 130, 60],
+    'ウマ': [275, 290, 95], 'ワニ': [250, 520, 100], 'カメレオン': [220, 400, 110], 'トラ': [300, 450, 160], 'シマウマ': [275, 290, 95], 'サイ': [260, 480, 150], 'ゴリラ': [500, 270, 165], 'ラクダ': [220, 215, 80],
+    'カンガルー': [360, 265, 95], 'シカ': [290, 265, 85], 'オオカミ': [300, 340, 130], 'ワシ': [390, 260, 105], 'ツル': [355, 150, 50],
+    'ハクチョウ': [360, 200, 65], 'オウム': [420, 250, 110], 'ダチョウ': [290, 105, 60], 'タツノオトシゴ': [450, 230, 100], 'エビ': [290, 410, 110], 'ザリガニ': [500, 300, 100], 'カマキリ': [290, 235, 70], 'サソリ': [300, 620, 80],
+    'チョウチンアンコウ': [420, 480, 230], 'マンボウ': [330, 480, 200], 'ユニコーン': [275, 290, 95], 'カッパ': [500, 300, 180],
+  };
+
+  // 絵を小さくして動かす（飾りを置く場所をあけるため）
+  const move = (ops, s, dx, dy) => ops.map((op) => ({ ...op, w: op.w ? Math.max(2, op.w * s) : op.w, p: op.p.map((v, i) => (i % 2 ? dy + v * s : dx + v * s)) }));
+  // 絵がある範囲
+  const box = (ops) => {
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const op of ops) for (let i = 0; i < op.p.length; i += 2) { x0 = Math.min(x0, op.p[i]); x1 = Math.max(x1, op.p[i]); y0 = Math.min(y0, op.p[i + 1]); y1 = Math.max(y1, op.p[i + 1]); }
+    return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
+  };
+
+  // ---------- 飾りの部品（x, y = 置く場所、s = 大きさのもと） ----------
+  const star4 = (x, y, r, c = '#fdd835') => P([0, 1, 2, 3, 4, 5, 6, 7].map((i) => pol(x, y, i % 2 ? r * 0.32 : r, i * 45 - 90)), c, '#c79100', 4);
+  const bow = (x, y, s, fill = '#f06292', out = '#ad1457') => [
+    C([[x, y], [x - 1.5 * s, y - s], [x - 1.7 * s, y + 0.9 * s]], fill, out, 7), C([[x, y], [x + 1.5 * s, y - s], [x + 1.7 * s, y + 0.9 * s]], fill, out, 7),
+    P([[x - 0.3 * s, y], [x - 0.9 * s, y + 1.9 * s], [x - 0.2 * s, y + 1.6 * s]], fill, out, 6), P([[x + 0.3 * s, y], [x + 0.9 * s, y + 1.9 * s], [x + 0.2 * s, y + 1.6 * s]], fill, out, 6),
+    E(x, y, s * 0.45, s * 0.45, fill, out, 6),
+  ];
+  const santaHat = (x, y, s) => [
+    C([[x - 1.9 * s, y], [x - 1.5 * s, y - 1.6 * s], [x - 0.3 * s, y - 2.9 * s], [x + 1.3 * s, y - 3.1 * s], [x + 2.2 * s, y - 2.1 * s], [x + 1.6 * s, y - 1.7 * s], [x + 1.2 * s, y - 2.1 * s], [x + 1.6 * s, y]], RED, DRED, 9),
+    R(x - 2.3 * s, y - 0.45 * s, x + 2.1 * s, y + 0.45 * s, WHITE, SNOW, 8, 0.42 * s), E(x + 2.05 * s, y - 1.75 * s, 0.55 * s, 0.55 * s, WHITE, SNOW, 7),
+  ];
+  const witchHat = (x, y, s) => [
+    E(x, y, 2.7 * s, 0.6 * s, '#3b2a5c', BLACK, 9),
+    C([[x - 1.5 * s, y - 0.1 * s], [x - 0.8 * s, y - 2.2 * s], [x + 0.2 * s, y - 3.7 * s], [x + 1.1 * s, y - 3.8 * s], [x + 0.6 * s, y - 2.7 * s], [x + 1.5 * s, y - 0.1 * s]], '#4a3573', BLACK, 9),
+    L([[x - 1.38 * s, y - 0.5 * s], [x + 1.4 * s, y - 0.5 * s]], '#f57c1f', 0.42 * s), R(x - 0.35 * s, y - 0.8 * s, x + 0.35 * s, y - 0.2 * s, GOLD, DGOLD, 5),
+  ];
+  const crown = (x, y, s) => [
+    P([[x - 1.6 * s, y], [x - 1.85 * s, y - 1.7 * s], [x - 0.8 * s, y - 0.75 * s], [x, y - 2.1 * s], [x + 0.8 * s, y - 0.75 * s], [x + 1.85 * s, y - 1.7 * s], [x + 1.6 * s, y]], GOLD, DGOLD, 8),
+    R(x - 1.62 * s, y - 0.1 * s, x + 1.62 * s, y + 0.5 * s, '#f7c948', DGOLD, 7, 0.15 * s),
+    [[-1.85, -1.7], [0, -2.1], [1.85, -1.7]].map(([dx, dy]) => D(x + dx * s, y + dy * s, 0.22 * s, '#fdd835')), D(x, y + 0.2 * s, 0.24 * s, RED), D(x - 0.9 * s, y + 0.2 * s, 0.18 * s, BLUE), D(x + 0.9 * s, y + 0.2 * s, 0.18 * s, GREEN),
+  ];
+  const strawHat = (x, y, s) => [
+    E(x, y, 2.8 * s, 0.65 * s, '#f0d48a', '#a8842f', 8), P(ellPts(x, y - 0.05 * s, 1.5 * s, 1.6 * s, 0, 180, 360), '#f5dc9a', '#a8842f', 8),
+    L([[x - 1.45 * s, y - 0.3 * s], [x + 1.45 * s, y - 0.3 * s]], RED, 0.42 * s),
+  ];
+  const scarf = (x, y, s) => [
+    P([[x + 0.5 * s, y + 0.2 * s], [x + 1.3 * s, y + 0.2 * s], [x + 1.5 * s, y + 2.1 * s], [x + 0.7 * s, y + 2.1 * s]], RED, DRED, 7),
+    R(x - 1.7 * s, y - 0.45 * s, x + 1.7 * s, y + 0.45 * s, RED, DRED, 7, 0.4 * s),
+    [-1, -0.2, 0.6].map((t) => L([[x + t * s, y - 0.36 * s], [x + t * s + 0.2 * s, y + 0.36 * s]], WHITE, 0.16 * s)), L([[x + 0.78 * s, y + 1.7 * s], [x + 1.45 * s, y + 1.7 * s]], WHITE, 0.14 * s),
+  ];
+  const sunglasses = (x, y, s) => [
+    L([[x - 0.2 * s, y - 0.1 * s], [x + 0.2 * s, y - 0.1 * s]], BLACK, 0.16 * s), L([[x - 1.55 * s, y - 0.2 * s], [x - 1.9 * s, y - 0.35 * s]], BLACK, 0.14 * s), L([[x + 1.55 * s, y - 0.2 * s], [x + 1.9 * s, y - 0.35 * s]], BLACK, 0.14 * s),
+    R(x - 1.55 * s, y - 0.5 * s, x - 0.15 * s, y + 0.5 * s, '#263238', BLACK, 6, 0.3 * s), R(x + 0.15 * s, y - 0.5 * s, x + 1.55 * s, y + 0.5 * s, '#263238', BLACK, 6, 0.3 * s),
+    L([[x - 1.2 * s, y + 0.15 * s], [x - 0.8 * s, y - 0.25 * s]], '#8fa3ad', 0.12 * s), L([[x + 0.5 * s, y + 0.15 * s], [x + 0.9 * s, y - 0.25 * s]], '#8fa3ad', 0.12 * s),
+  ];
+  const tie = (x, y, s) => [
+    P([[x - 0.4 * s, y + 0.3 * s], [x + 0.4 * s, y + 0.3 * s], [x + 0.7 * s, y + 2.4 * s], [x, y + 3.1 * s], [x - 0.7 * s, y + 2.4 * s]], BLUE, DBLUE, 6),
+    [[0.9, 0], [1.6, 0], [2.3, 0]].map(([t]) => L([[x - 0.45 * s, y + t * s], [x + 0.45 * s, y + (t + 0.4) * s]], '#fdd835', 0.16 * s)),
+    P([[x - 0.5 * s, y - 0.35 * s], [x + 0.5 * s, y - 0.35 * s], [x + 0.35 * s, y + 0.4 * s], [x - 0.35 * s, y + 0.4 * s]], '#1565c0', DBLUE, 6),
+  ];
+  const umbrella = (x, y, s) => [
+    L([[x, y], [x, y - 3.3 * s]], BROWN, 0.22 * s), A(x - 0.35 * s, y, 0.35 * s, 0.4 * s, 0, 180, BROWN, 0.22 * s), L([[x, y - 5.3 * s], [x, y - 5.6 * s]], INK, 0.16 * s),
+    P([...ellPts(x, y - 3.2 * s, 2.7 * s, 2.1 * s, 0, 180, 360), ...[3, 2, 1, 0].flatMap((i) => ellPts(x - 2.025 * s + i * 1.35 * s, y - 3.2 * s, 0.675 * s, 0.4 * s, 0, 0, -180, 8))], '#1e88e5', DBLUE, 8),
+    [-1.35, 0, 1.35].map((t) => Q([[x, y - 5.3 * s], [x + t * 0.6 * s, y - 4.4 * s], [x + t * s, y - 3.2 * s]], DBLUE, 5)),
+  ];
+  const balloon = (x, y, s) => [
+    Q([[x, y], [x + 0.3 * s, y - 1.6 * s], [x - 0.2 * s, y - 3.2 * s]], DGRAY, 5),
+    E(x - 0.2 * s, y - 4.7 * s, 1.3 * s, 1.6 * s, RED, DRED, 8), P([[x - 0.4 * s, y - 3.15 * s], [x, y - 3.15 * s], [x + 0.05 * s, y - 2.9 * s], [x - 0.45 * s, y - 2.9 * s]], RED, DRED, 5),
+    A(x - 0.2 * s, y - 4.7 * s, 0.9 * s, 1.15 * s, 195, 250, '#ff8f85', 0.25 * s),
+  ];
+  const gift = (x, y, s) => [
+    R(x - 1.2 * s, y - 2 * s, x + 1.2 * s, y, '#43a047', DGREEN, 8), R(x - 1.4 * s, y - 2.6 * s, x + 1.4 * s, y - 1.9 * s, '#66bb6a', DGREEN, 8, 0.1 * s),
+    R(x - 0.25 * s, y - 2.6 * s, x + 0.25 * s, y, GOLD, null), bow(x, y - 2.7 * s, 0.45 * s, GOLD, DGOLD),
+  ];
+  const pumpkin = (x, y, s) => [
+    P([[x - 0.15 * s, y - 2.2 * s], [x - 0.1 * s, y - 2.7 * s], [x + 0.25 * s, y - 2.8 * s], [x + 0.2 * s, y - 2.2 * s]], '#6b8e3a', '#3d5a1c', 6),
+    E(x, y - 1.15 * s, 1.5 * s, 1.15 * s, '#f57c1f', '#a84a00', 8), A(x, y - 1.15 * s, 0.75 * s, 1.15 * s, 90, 270, '#c25e00', 6), A(x, y - 1.15 * s, 0.75 * s, 1.15 * s, -90, 90, '#c25e00', 6),
+    P([[x - 0.75 * s, y - 1.3 * s], [x - 0.45 * s, y - 1.75 * s], [x - 0.2 * s, y - 1.3 * s]], '#3b1d00', null), P([[x + 0.2 * s, y - 1.3 * s], [x + 0.45 * s, y - 1.75 * s], [x + 0.75 * s, y - 1.3 * s]], '#3b1d00', null),
+    P([[x - 0.8 * s, y - 0.85 * s], [x - 0.4 * s, y - 0.7 * s], [x, y - 0.9 * s], [x + 0.4 * s, y - 0.7 * s], [x + 0.8 * s, y - 0.85 * s], [x + 0.4 * s, y - 0.35 * s], [x - 0.4 * s, y - 0.35 * s]], '#3b1d00', null),
+  ];
+  const ghost = (x, y, s) => [
+    C([[0, -2.2], [1.15, -1.7], [1.45, -0.2], [1.4, 1.9], [0.95, 1.5], [0.5, 2.0], [0, 1.55], [-0.5, 2.0], [-0.95, 1.5], [-1.4, 1.9], [-1.45, -0.2], [-1.15, -1.7]].map(([a, b]) => [x + a * s, y + b * s]), '#fdfdfd', '#8f979b', 8),
+    E(x - 0.45 * s, y - 0.7 * s, 0.22 * s, 0.32 * s, BLACK, null), E(x + 0.45 * s, y - 0.7 * s, 0.22 * s, 0.32 * s, BLACK, null), E(x, y + 0.1 * s, 0.28 * s, 0.36 * s, BLACK, null),
+  ];
+  const zzz = (x, y, s) => [[0, 0, 0.6], [0.9, -1.0, 0.85], [2.1, -2.3, 1.15]].map(([dx, dy, k2]) => { const a = x + dx * s, b = y + dy * s, w = k2 * s; return L([[a, b], [a + w, b], [a, b + w], [a + w, b + w]], '#5c6bc0', Math.max(6, 0.2 * w)); });
+  const anger = (x, y, s) => [0, 90, 180, 270].map((a) => Q([pol(x, y, 1.1 * s, a + 20), pol(x, y, 0.42 * s, a + 45), pol(x, y, 1.1 * s, a + 70)], RED, Math.max(7, 0.3 * s)));
+  const note = (x, y, s, two) => [
+    E(x, y, 0.5 * s, 0.38 * s, BLACK, null, 0, -20), L([[x + 0.42 * s, y - 0.1 * s], [x + 0.42 * s, y - 2 * s]], BLACK, Math.max(5, 0.16 * s)),
+    two ? [E(x + 1.5 * s, y - 0.3 * s, 0.5 * s, 0.38 * s, BLACK, null, 0, -20), L([[x + 1.92 * s, y - 0.4 * s], [x + 1.92 * s, y - 2.3 * s]], BLACK, Math.max(5, 0.16 * s)), L([[x + 0.42 * s, y - 2 * s], [x + 1.92 * s, y - 2.3 * s]], BLACK, Math.max(8, 0.36 * s))]
+      : Q([[x + 0.42 * s, y - 2 * s], [x + 1.1 * s, y - 1.6 * s], [x + 1.0 * s, y - 0.9 * s]], BLACK, Math.max(5, 0.2 * s)),
+  ];
+  const cake = (x, y, s) => [
+    E(x, y, 1.9 * s, 0.35 * s, LGRAY, GRAY, 6),
+    P([[x - 1.3 * s, y - 0.15 * s], [x + 1.3 * s, y - 0.15 * s], [x + 1.3 * s, y - 1.55 * s], [x - 1.3 * s, y - 1.1 * s]], '#fde8b8', '#b98a45', 7),
+    L([[x - 1.25 * s, y - 0.62 * s], [x + 1.25 * s, y - 0.8 * s]], '#ef9a9a', 0.2 * s), Q([[x - 1.3 * s, y - 1.1 * s], [x - 0.4 * s, y - 1.5 * s], [x + 0.5 * s, y - 1.35 * s], [x + 1.3 * s, y - 1.6 * s]], WHITE, 0.38 * s),
+    E(x + 0.5 * s, y - 1.9 * s, 0.4 * s, 0.42 * s, RED, DRED, 5),
+  ];
+  const wings = (cx, cy, s) => [-1, 1].map((g) => [
+    C([[0.4, 0.2], [2.4, -2.3], [4.3, -2.6], [3.7, -0.8], [3.9, 0.5], [2.7, 0.3], [2.5, 1.3], [1.4, 0.9]].map(([a, b]) => [cx + g * a * s, cy + b * s]), '#fdfdfd', '#8f979b', 8),
+    [[1.6, -1.0, 3.5, -1.9], [1.6, -0.3, 3.3, -0.5], [1.4, 0.3, 2.5, 0.6]].map(([a, b, c, d]) => L([[cx + g * a * s, cy + b * s], [cx + g * c * s, cy + d * s]], '#c9d0d4', 5)),
+  ]);
+  const snowman = (x, y, s) => [
+    E(x, y - 1.1 * s, 1.25 * s, 1.1 * s, WHITE, '#8fa9ba', 8), E(x, y - 2.8 * s, 0.85 * s, 0.8 * s, WHITE, '#8fa9ba', 8),
+    D(x - 0.3 * s, y - 2.95 * s, 0.1 * s, BLACK), D(x + 0.3 * s, y - 2.95 * s, 0.1 * s, BLACK), P([[x, y - 2.8 * s], [x + 0.6 * s, y - 2.65 * s], [x, y - 2.55 * s]], ORANGE, DORANGE, 4),
+    R(x - 0.8 * s, y - 2.2 * s, x + 0.8 * s, y - 1.95 * s, RED, null, 0, 0.1 * s), P([[x - 0.55 * s, y - 3.5 * s], [x - 0.45 * s, y - 4.3 * s], [x + 0.45 * s, y - 4.3 * s], [x + 0.55 * s, y - 3.5 * s]], '#1f6fc4', DBLUE, 6),
+    D(x, y - 1.5 * s, 0.1 * s, BLACK), D(x, y - 0.9 * s, 0.1 * s, BLACK),
+  ];
+  // 小さな人（大きさをくらべるために、となりに立たせる）
+  const person = (x, y, s) => [
+    L([[x - 0.4 * s, y - 1.6 * s], [x - 0.5 * s, y]], NAVY, Math.max(5, 0.5 * s)), L([[x + 0.4 * s, y - 1.6 * s], [x + 0.5 * s, y]], NAVY, Math.max(5, 0.5 * s)),
+    R(x - 0.75 * s, y - 3.6 * s, x + 0.75 * s, y - 1.5 * s, '#4f9fd1', DBLUE, 5, 0.3 * s),
+    L([[x - 0.75 * s, y - 3.3 * s], [x - 1.5 * s, y - 4.4 * s]], '#fcd7b6', Math.max(5, 0.42 * s)), L([[x + 0.75 * s, y - 3.3 * s], [x + 1.4 * s, y - 2.2 * s]], '#fcd7b6', Math.max(5, 0.42 * s)),
+    E(x, y - 4.5 * s, 0.85 * s, 0.85 * s, '#fcd7b6', '#b9804f', 5), P(ellPts(x, y - 4.6 * s, 0.9 * s, 0.9 * s, 0, 180, 360), '#3b2a1e', null),
+  ];
+  const cloud = (x, y, s) => C([[-1.9, 0.5], [-2.1, -0.2], [-1.2, -0.8], [-0.4, -0.7], [0, -1.4], [1.0, -1.5], [1.5, -0.8], [2.2, -0.6], [2.4, 0.2], [1.9, 0.7], [0, 0.8]].map(([a, b]) => [x + a * s, y + b * s]), '#f6fbff', '#7fa9c9', 8);
+  const bat = (x, y, s) => P([[0, 0.5], [-0.5, -0.1], [-1.1, 0.2], [-1.9, -0.9], [-1.0, -0.6], [-0.4, -0.9], [-0.3, -1.3], [0, -1.0], [0.3, -1.3], [0.4, -0.9], [1.0, -0.6], [1.9, -0.9], [1.1, 0.2], [0.5, -0.1]].map(([a, b]) => [x + a * s, y + b * s]), '#3b2a5c', BLACK, 5);
+  const holly = (x, y, s) => [leaf(x, y, x - 2.2 * s, y - 1.2 * s, '#2e7d32', '#17481b', 0.34), leaf(x, y, x + 2.2 * s, y - 1.2 * s, '#2e7d32', '#17481b', 0.34), D(x - 0.4 * s, y, s * 0.42, RED), D(x + 0.4 * s, y, s * 0.42, RED), D(x, y - 0.6 * s, s * 0.42, '#c62828')];
+  // 上にのった雪（絵の上のはしに、もこもこの白い雪）
+  const snowCap = (b) => {
+    const n = 6, top = [], bottom = [];
+    for (let i = 0; i <= n; i++) top.push([b.x0 + b.w * (0.06 + 0.88 * i / n), b.y0 - 6 + (i % 2 ? -0.05 : 0.01) * b.h + Math.abs(i - n / 2) * 0.035 * b.h]);
+    for (let i = n; i >= 0; i--) bottom.push([b.x0 + b.w * (0.06 + 0.88 * i / n), b.y0 + (i % 2 ? 0.2 : 0.11) * b.h + Math.abs(i - n / 2) * 0.035 * b.h]);
+    return [C([...top, ...bottom], WHITE, '#8fa9ba', 8), [[0.2, 0.5], [0.85, 0.42], [0.08, 0.8], [0.93, 0.75], [0.5, -0.12]].map(([u, v]) => D(b.x0 + b.w * u + (u < 0.5 ? -60 : 60) * (v > 0 ? 1 : 0), b.y0 + b.h * v, 11, '#cfeafa'))];
+  };
+
+  // ---------- 組み合わせ ----------
+  function decorate(ops, mod, base, left) {
+    const h = HEADS[base];
+    // 頭の場所（絵を動かしたあとの場所に直す）
+    const head = (s = 1, dx = 0, dy = 0) => {
+      const b = box(ops);
+      const [x, y, r] = h || [b.cx, b.y0 + b.h * 0.25, Math.min(b.w, b.h) * 0.28];
+      return { x: dx + x * s, y: dy + y * s, r: r * s };
+    };
+    const fit = (s, dx, dy) => move(ops, s, dx, dy);
+    const hatAt = (hd) => [hd.x + (left ? hd.r * 0.12 : 0), hd.y - hd.r * 0.8];
+    const neckAt = (hd) => [hd.x + (left ? hd.r * 0.75 : 0), hd.y + hd.r * (left ? 0.85 : 0.98)];
+
+    switch (mod) {
+      // ----- 動物：かぶる・つける -----
+      case 'サンタ帽子をかぶった': { const o = fit(0.85, 75, 150), hd = head(0.85, 75, 150); return flat([o, santaHat(...hatAt(hd), hd.r * 0.36)]); }
+      case '魔女の帽子をかぶった': { const o = fit(0.82, 90, 180), hd = head(0.82, 90, 180); return flat([o, witchHat(...hatAt(hd), hd.r * 0.4)]); }
+      case '王冠をかぶった': { const o = fit(0.88, 60, 120), hd = head(0.88, 60, 120); return flat([o, crown(hatAt(hd)[0], hatAt(hd)[1] - hd.r * 0.05, hd.r * 0.42)]); }
+      case '麦わら帽子をかぶった': { const o = fit(0.88, 60, 120), hd = head(0.88, 60, 120); return flat([o, strawHat(...hatAt(hd), hd.r * 0.42)]); }
+      case 'マフラーを巻いた': { const hd = head(); return flat([ops, scarf(...neckAt(hd), hd.r * 0.5)]); }
+      case 'サングラスをかけた': { const hd = head(); return flat([ops, sunglasses(hd.x - (left ? hd.r * 0.25 : 0), hd.y - hd.r * 0.1, hd.r * (left ? 0.36 : 0.48))]); }
+      case 'リボンを付けた': { const hd = head(); return flat([ops, bow(hd.x + hd.r * 0.55, hd.y - hd.r * 0.78, Math.max(26, hd.r * 0.3))]); }
+      case 'ネクタイを締めた': { const hd = head(); return flat([ops, tie(...neckAt(hd), Math.max(30, hd.r * 0.36))]); }
+      // ----- 動物：持つ・ならぶ -----
+      case '傘をさした': { const o = fit(0.72, 100, 270), hd = head(0.72, 100, 270), s = Math.max(60, hd.r * 0.8); return flat([o, umbrella(hd.x + hd.r * 0.95, hd.y - hd.r * 1.08 + 3.2 * s, s)]); } // 傘の下のはしが、頭のすぐ上にくる
+      case '風船を持った': { const o = fit(0.76, 20, 235), b = box(o); return flat([o, balloon(Math.min(880, b.x1 + 40), b.cy + 40, 62)]); }
+      case 'プレゼントを持った': { const o = fit(0.76, 10, 235); return flat([o, gift(865, 985, 78)]); }
+      case 'ハロウィンのかぼちゃを持った': { const o = fit(0.76, 10, 235); return flat([o, pumpkin(860, 985, 80)]); }
+      case 'お化けにびっくりした': { const o = fit(0.72, 10, 275), hd = head(0.72, 10, 275); return flat([o, ghost(850, 330, 100), L([[hd.x + hd.r * 1.15, hd.y - hd.r * 1.3], [hd.x + hd.r * 1.25, hd.y - hd.r * 0.75]], RED, 16), D(hd.x + hd.r * 1.3, hd.y - hd.r * 0.5, 11, RED),
+        L([[hd.x + hd.r * 1.5, hd.y - hd.r * 1.2], [hd.x + hd.r * 1.56, hd.y - hd.r * 0.78]], RED, 13), D(hd.x + hd.r * 1.58, hd.y - hd.r * 0.55, 9, RED)]); }
+      case '雪だるまと並んだ': { const o = fit(0.74, 10, 255); return flat([o, snowman(865, 985, 90), [[720, 200], [860, 120], [940, 300], [780, 420]].map(([x, y]) => D(x, y, 11, '#cfeafa'))]); }
+      case 'ケーキを食べている': { const o = fit(0.76, 10, 235); return flat([o, cake(850, 965, 80), L([[690, 760], [760, 880]], '#b9c0c4', 12), L([[745, 860], [760, 905]], '#b9c0c4', 8), L([[775, 852], [778, 900]], '#b9c0c4', 8)]); }
+      // ----- 動物：気持ち・動き -----
+      case '眠そうな': { const o = fit(0.8, 30, 195), hd = head(0.8, 30, 195); return flat([o, zzz(Math.min(700, hd.x + hd.r * 0.9), Math.max(300, hd.y - hd.r * 0.9), Math.max(50, hd.r * 0.42))]); }
+      case '怒っている': { const o = fit(0.88, 40, 115), hd = head(0.88, 40, 115), s = Math.max(46, hd.r * 0.36); return flat([o, anger(hd.x + hd.r * 0.8, hd.y - hd.r * 0.8, s), [[-1.3, -1.5], [-0.6, -1.9]].map(([a, b]) => C([[hd.x + hd.r * a - 26, hd.y + hd.r * b], [hd.x + hd.r * a, hd.y + hd.r * b - 30], [hd.x + hd.r * a + 28, hd.y + hd.r * b], [hd.x + hd.r * a, hd.y + hd.r * b + 22]], '#eceff1', GRAY, 5))]); }
+      case '大笑いしている': { const o = fit(0.88, 60, 115), hd = head(0.88, 60, 115); return flat([o,
+        [-1, 1].map((g) => [[-35, 1.25], [0, 1.4], [35, 1.25]].map(([a, k2]) => L([pol(hd.x, hd.y - hd.r * 0.1, hd.r * 1.15, g > 0 ? a - 15 : 195 - a), pol(hd.x, hd.y - hd.r * 0.1, hd.r * (1.15 + (k2 - 1) * 1.1), g > 0 ? a - 15 : 195 - a)], ORANGE, 12))),
+        [-1, 1].map((g) => C([[hd.x + g * hd.r * 0.62, hd.y - hd.r * 0.1], [hd.x + g * hd.r * 0.72, hd.y + hd.r * 0.12], [hd.x + g * hd.r * 0.62, hd.y + hd.r * 0.2], [hd.x + g * hd.r * 0.52, hd.y + hd.r * 0.12]], '#8fd0f2', '#2f7fb0', 4))]); }
+      case '踊っている': { const o = fit(0.8, 100, 195), b = box(o); return flat([o, note(70, 230, 44, true), note(830, 180, 50, false), note(880, 520, 38, false),
+        [-1, 1].map((g) => [0.35, 0.6].map((t) => A(b.cx + g * (b.w / 2 + 30), b.y0 + b.h * t, 36, 60, g > 0 ? -50 : 130, g > 0 ? 50 : 230, '#9aa5ab', 8)))]); }
+      // ----- 食べ物・もの -----
+      case '巨大な': { const o = fit(0.92, 0, 60); return flat([o, person(920, 985, 24), L([[860, 990], [980, 990]], '#9aa5ab', 6)]); }
+      case '山盛りの': return flat([E(500, 955, 470, 40, LGRAY, GRAY, 8), move(ops, 0.5, 250, 110), move(ops, 0.5, 20, 450), move(ops, 0.5, 480, 450)]);
+      case '一口かじった': { const b = box(ops), r = Math.min(b.w, b.h) * 0.17, x = b.x1 - b.w * 0.14, y = b.y0 + b.h * 0.2; return flat([ops, D(x + r * 0.9, y - r * 0.5, r * 1.1, WHITE), D(x, y, r, WHITE), D(x + r * 0.2, y + r * 1.2, r * 0.8, WHITE), D(x + r * 1.5, y + r * 0.8, r * 1.2, WHITE),
+        A(x, y, r, r, 100, 260, '#9aa5ab', 6), A(x + r * 0.2, y + r * 1.2, r * 0.8, r * 0.8, 80, 200, '#9aa5ab', 6)]); }
+      case 'リボンをかけた': { const o = fit(0.9, 50, 90), b = box(o); return flat([o, L([[b.cx, b.y0 + 4], [b.cx, b.y1 - 4]], '#ad1457', 34), L([[b.cx, b.y0 + 4], [b.cx, b.y1 - 4]], '#f06292', 22), L([[b.x0 + 4, b.cy], [b.x1 - 4, b.cy]], '#ad1457', 34), L([[b.x0 + 4, b.cy], [b.x1 - 4, b.cy]], '#f06292', 22), bow(b.cx, b.y0 + 10, Math.max(46, b.w * 0.09))]); }
+      case 'サンタ帽子をのせた':
+      case 'サンタ帽子をかぶせた': { const o = fit(0.8, 100, 195), b = box(o); return flat([o, santaHat(b.cx, b.y0 + b.h * 0.05, Math.min(80, Math.max(44, b.w * 0.14)))]); }
+      case '雪をかぶった':
+      case '雪が積もった': { const o = fit(0.9, 50, 90), b = box(o); return flat([o, snowCap(b)]); }
+      case '凍った': { const o = fit(0.74, 130, 150), b = box(o), x0 = b.x0 - 50, x1 = b.x1 + 50, y0 = b.y0 - 60, y1 = b.y1 + 40; return flat([R(x0, y0, x1, y1, '#dff3fc', ICE, 12, 30), o,
+        Array.from({ length: 7 }, (_, i) => { const x = x0 + (x1 - x0) * (0.1 + i * 0.133), hh = 50 + (i % 3) * 34; return P([[x - 22, y1 - 6], [x + 22, y1 - 6], [x, y1 + hh]], '#cfeafa', ICE, 6); }),
+        L([[x0 + 30, y0 + 90], [x0 + 110, y0 + 30]], WHITE, 14), L([[x0 + 30, y0 + 150], [x0 + 60, y0 + 126]], WHITE, 12), L([[x1 - 110, y1 - 40], [x1 - 40, y1 - 100]], WHITE, 12),
+        star4(x1 - 30, y0 + 30, 34, '#b9e3f8'), star4(x0 + 20, y1 - 30, 26, '#b9e3f8')]); }
+      case 'ピカピカ光る': { const o = fit(0.76, 120, 120), b = box(o); return flat([rays(b.cx, b.cy, Math.max(b.w, b.h) * 0.56, Math.max(b.w, b.h) * 0.72, 16, '#fdd835', 14), o,
+        star4(b.x0 - 30, b.y0 + 30, 50), star4(b.x1 + 40, b.y0 + 90, 40), star4(b.x1 + 10, b.y1 - 20, 54), star4(b.x0 + 10, b.y1 - 60, 36), star4(b.cx, b.y0 - 50, 44)]); }
+      case '翼の生えた': { const o = fit(0.62, 190, 300), b = box(o); return flat([wings(b.cx, b.cy - b.h * 0.1, Math.max(60, b.w * 0.19)), o]); }
+      case '空に浮かぶ': { const o = fit(0.72, 140, 30), b = box(o); return flat([o, cloud(250, 900, 70), cloud(700, 930, 60), cloud(480, 850, 46),
+        [0.3, 0.5, 0.7].map((t) => L([[b.x0 + b.w * t, b.y1 + 20], [b.x0 + b.w * t, b.y1 + 60]], '#9aa5ab', 8))]); }
+      case 'クリスマスの飾りを付けた': { const o = fit(0.82, 90, 170), b = box(o); return flat([o,
+        Q([[b.x0, b.cy - 20], [b.cx - b.w * 0.25, b.cy + 50], [b.cx, b.cy + 20], [b.cx + b.w * 0.25, b.cy + 60], [b.x1, b.cy - 10]], '#f6d24a', 9),
+        [[0.08, 8, RED], [0.28, 46, BLUE], [0.5, 20, '#43a047'], [0.72, 54, '#ec407a'], [0.92, 12, '#fdd835']].map(([t, dy, c]) => E(b.x0 + b.w * t, b.cy + dy + 18, 22, 22, c, INK, 5)),
+        P(Array.from({ length: 10 }, (_, i) => pol(b.cx, b.y0 - 40, i % 2 ? 24 : 54, -90 + i * 36)), '#fdd835', '#c79100', 6), holly(b.x0 + 40, b.y1 - 10, 30)]); }
+      case 'ハロウィンの飾りを付けた': { const o = fit(0.82, 90, 170), b = box(o); return flat([o, bat(b.x0 + 10, b.y0 - 30, 36), bat(b.x1 - 20, b.y0 + 10, 28), pumpkin(b.x1 + 10, b.y1 + 10, 46),
+        rays(b.x0 - 60, b.y1 - 30, 0, 90, 5, '#5a646b', 5, 250, 380), [36, 68].map((r) => Q([pol(b.x0 - 60, b.y1 - 30, r, 250), pol(b.x0 - 60, b.y1 - 30, r * 0.86, 315), pol(b.x0 - 60, b.y1 - 30, r, 380)], '#5a646b', 5)),
+        Q([[b.x0 + 60, b.y0 - 60], [b.cx, b.y0 - 20], [b.x1 - 60, b.y0 - 60]], '#3b2a5c', 6), [0.25, 0.42, 0.58, 0.75].map((t, i) => P([[b.x0 + b.w * t - 22, b.y0 - 44 + Math.abs(t - 0.5) * -40], [b.x0 + b.w * t + 22, b.y0 - 44 + Math.abs(t - 0.5) * -40], [b.x0 + b.w * t, b.y0 + 4]], i % 2 ? '#8e24aa' : '#f57c1f', INK, 4))]); }
+      default: return ops;
+    }
+  }
+
+  return { decorate };
+};

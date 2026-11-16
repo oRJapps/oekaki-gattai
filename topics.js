@@ -117,6 +117,9 @@ export const topicsInFile = (file) => Object.keys(INFO).filter((name) => INFO[na
 // 見本のファイル名（samples/ の中）。知らないお題なら null
 export const sampleFile = (base) => (INFO[base] ? INFO[base].file : null);
 
+// そのお題につけられることばの一覧（確認用）
+export const MODS_FOR = (base) => (INFO[base] && MODS[INFO[base].kind]) || [];
+
 // お題の文字から、もとのお題（base）と、前につけたことば（mod）を取り出す。知らないお題なら null
 export function parseTopic(text) {
   if (typeof text !== 'string' || text.length > 40) return null;

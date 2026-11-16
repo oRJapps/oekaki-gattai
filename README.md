@@ -91,6 +91,7 @@ python -m http.server 5173 --directory oekaki-web
 - `style.css`：見た目（色、ボタン、アニメーション）
 - `samples.js`：見本の絵（おてほん）を描く道具と、読みこむ関数
 - `samples/`：見本の絵そのもの（300こ。種類ごとのファイル）
+- `samples/mods.js`：組み合わせお題の見本を作る（もとの絵に、帽子・リボン・雪などの飾りを描き足す）
 - `tools/check_samples.mjs`：全部のお題に見本があるかを調べる（`node tools/check_samples.mjs`）
 - `tools/sheet.html`：見本の絵を一覧で見る（`http://localhost:5173/tools/sheet.html?f=plant`）
 - `topics.js`：難易度とお題300こ、組み合わせお題、同じお題をくり返さないしくみ

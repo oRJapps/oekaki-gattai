@@ -119,14 +119,18 @@ const loaded = {}; // ファイル名 → その中の絵（お題 → 絵を作
 
 // お題の見本の絵（線とぬった面のならび）を読みこむ。file = samples/ の中のファイル名。見本がないときは null
 // flip = true のときは、左右を逆にする（右向きに描いた絵を、左向きで出す）
-export async function loadSample(topic, file, flip = false) {
+// mod = 組み合わせお題のことば（「リボンを付けた」など）。あれば、そのことばに合った飾りを描き足す。left = 左向きの動物か
+export async function loadSample(topic, file, flip = false, mod = '', left = false) {
   if (!file || !/^[a-z0-9]+$/.test(file)) return null;
   try {
     if (!loaded[file]) loaded[file] = (await import(`./samples/${file}.js${VER}`)).default(KIT);
     const make = loaded[file][topic];
     if (!make) return null;
     const ops = make().flat(Infinity).filter(Boolean);
-    return flip ? ops.map((op) => ({ ...op, p: op.p.map((v, i) => (i % 2 ? v : 1000 - v)) })) : ops;
+    const turned = flip ? ops.map((op) => ({ ...op, p: op.p.map((v, i) => (i % 2 ? v : 1000 - v)) })) : ops;
+    if (!mod) return turned;
+    if (!loaded.mods) loaded.mods = (await import(`./samples/mods.js${VER}`)).default(KIT);
+    return loaded.mods.decorate(turned, mod, topic, left);
   } catch (err) {
     console.warn('sample', file, err);
     return null;
