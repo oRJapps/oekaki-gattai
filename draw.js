@@ -375,7 +375,17 @@ export function drawSample(canvas, ops, size = 300) {
   c.fillStyle = '#fff';
   c.fillRect(0, 0, size, size);
   c.scale(size / 1000, size / 1000);
-  ops.forEach((s) => drawStroke(c, s));
+  ops.forEach((s) => {
+    if (!s.g) { drawStroke(c, s); return; }
+    // ぬった面（見本だけが使う）：点をつないだ形の中をぬる
+    c.globalCompositeOperation = 'source-over';
+    c.fillStyle = s.c;
+    c.beginPath();
+    c.moveTo(s.p[0], s.p[1]);
+    for (let i = 2; i < s.p.length; i += 2) c.lineTo(s.p[i], s.p[i + 1]);
+    c.closePath();
+    c.fill();
+  });
 }
 
 // ---------- つなぎめを調べる ----------
