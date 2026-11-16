@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116223852';
-import { loadSample, loadAlternates } from './samples.js?v=20261116223852';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116223852';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116223852';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116223852';
-import { makeCard } from './card.js?v=20261116223852';
-import * as net from './net.js?v=20261116223852';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116224723';
+import { loadSample, loadAlternates } from './samples.js?v=20261116224723';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116224723';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116224723';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116224723';
+import { makeCard } from './card.js?v=20261116224723';
+import * as net from './net.js?v=20261116224723';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);

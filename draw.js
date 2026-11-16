@@ -393,6 +393,7 @@ export function drawSample(canvas, ops, size = 300) {
 }
 
 // ---------- つなぎめを調べる ----------
+const WARP_FADE = 260, WARP_STRIPS = 16; // 細かい所を合わせるとき：つなぎめから何ドットまで伸び縮みさせるか、何本の帯に分けるか
 const DEPTHS = [3, 8, 14, 20, 27, 34]; // つなぎめから何ドット内側までを「つなぎめにとどいている」と見るか
 
 // つなぎめに沿って、絵がある場所の集まり（run）をさがす。side = -1：つなぎめの手前の人、+1：向こうの人
@@ -436,6 +437,55 @@ function extent(layout, img, i, cut) {
 }
 
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+
+// つなぎめの「目印」をさがす：つなぎめに沿って見たときに、色が変わる所と、線が通っている所。
+// 例：せんべいなら「輪かくの左端、ノリの左端、ノリの右端、輪かくの右端」の4つ。
+// つなぎめのすぐ近く（20ドットより手前）は見ない（つなぎめに沿ってなぞった線にじゃまされないように）
+const MARK_DEPTHS = [20, 28, 36], THICK = 24;
+function marks(layout, data, i, cut, side) {
+  const f = layout.frame, b = layout.regions[i].bbox, img = data[i];
+  // 色の種類：0 = 何もない、1 = 黒っぽい、2〜7 = 色あい（60度ずつ）、8 = 灰色・白っぽい
+  const cls = (u, depth) => {
+    const [x, y] = toWorld(f, u, cut + side * depth);
+    const px = Math.round(x - b.x), py = Math.round(y - b.y);
+    if (px < 0 || py < 0 || px >= img.width || py >= img.height) return 0;
+    const k = (py * img.width + px) * 4;
+    if (img.data[k + 3] <= 60) return 0;
+    const r = img.data[k], g = img.data[k + 1], bl = img.data[k + 2];
+    if (0.3 * r + 0.59 * g + 0.11 * bl < 75) return 1;
+    const max = Math.max(r, g, bl), min = Math.min(r, g, bl);
+    if (max - min < 40) return 8;
+    let hue = max === r ? ((g - bl) / (max - min)) % 6 : max === g ? (bl - r) / (max - min) + 2 : (r - g) / (max - min) + 4;
+    if (hue < 0) hue += 6;
+    return 2 + (Math.floor(hue) % 6);
+  };
+  // つなぎめに沿って、同じ色の種類が続く区間（run）に分ける
+  const runs = [];
+  for (let u = 0; u <= layout.edgeLen; u += 2) {
+    const c3 = MARK_DEPTHS.map((d) => cls(u, d));
+    const c = c3[0] === c3[1] || c3[0] === c3[2] ? c3[0] : c3[1]; // 3か所のうち、多いほう
+    const last = runs[runs.length - 1];
+    if (last && last.c === c) last.z = u; else runs.push({ c, a: u, z: u });
+  }
+  // 太い区間どうしのさかいめ＝目印。間にある細い区間（線）は、そのまんなかを目印にする
+  const out = [];
+  let prev = null, inkA = null, inkZ = null;
+  for (const r of runs) {
+    if (r.z - r.a < THICK - 2) { // 細い区間
+      if (r.c !== 0) { if (inkA === null) inkA = r.a; inkZ = r.z; }
+      continue;
+    }
+    if (prev && (prev.c !== r.c || inkA !== null)) out.push(inkA !== null ? (inkA + inkZ) / 2 : (prev.z + r.a) / 2);
+    prev = r; inkA = null; inkZ = null;
+  }
+  // 近すぎる目印は、1つにまとめる
+  const merged = [];
+  for (const u of out) {
+    if (merged.length && u - merged[merged.length - 1] < THICK) merged[merged.length - 1] = (merged[merged.length - 1] + u) / 2;
+    else merged.push(u);
+  }
+  return merged;
+}
 
 // つなぎめごとに、どれだけうまくつながっているかを調べて、合わせ方（拡大・縮小とずらし）と点数を決める
 function analyze(layout, layers) {
@@ -489,6 +539,29 @@ function analyze(layout, layers) {
     big.s = Math.max(0.7, big.s * ratio); // 小さくしすぎると、頭だけ小さい絵になるので、7割まで
     const ft = fit[bigIdx];
     if (!ft.lo || !ft.hi) ft.sv = big.s; // はしのパート：たても横も同じ倍率で小さくする（形をゆがめない）
+  });
+
+  // 細かい所を合わせる：両方の絵で目印の数が同じ（3つ以上）なら、目印どうしが重なるように、
+  // 片方の絵をつなぎめの近くだけ、場所ごとに伸び縮みさせる（せんべいの輪かくとノリを、両方合わせる）。
+  // 動かすのは、はしのパート。2人のときは、小さいほうの絵（大きいほうは動かさない）
+  joints.forEach((j, k) => {
+    const fa = fit[k].hi, fb = fit[k + 1].lo;
+    if (!fa || !fb) return;
+    const endA = !fit[k].lo, endB = !fit[k + 1].hi;
+    if (!endA && !endB) return; // まんなかのパートどうし：今までどおり
+    const moveB = endA && endB ? j.A.len >= j.B.len : endB;
+    const cut = layout.cuts[k];
+    const mA = marks(layout, data, k, cut, -1), mB = marks(layout, data, k + 1, cut, 1);
+    j.mA = mA; j.mB = mB;
+    if (mA.length !== mB.length || mA.length < 3) return;
+    const [src, e, refMarks, ref] = moveB ? [mB, fb, mA, fa] : [mA, fa, mB, fb];
+    const dst = refMarks.map((u) => ref.Q + ref.s * (u - ref.P));
+    const span = dst[dst.length - 1] - dst[0];
+    if (span < 60) return;
+    // 目印が遠すぎるとき（ちがう物どうしを合わせてしまいそうなとき）は、やめる
+    if (!src.every((u, m) => Math.abs(dst[m] - (e.Q + e.s * (u - e.P))) <= Math.max(30, 0.2 * span))) return;
+    e.warp = { src, dst };
+    j.warp = moveB ? 'B' : 'A';
   });
 
   // 点数：合わせる前の絵が、どれだけ合っていたか（はば・位置・線の本数）＋合わせたあとのずれ
@@ -550,7 +623,41 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
       const mix = (e) => ({ s: 1 + (e.s - 1) * t, P: e.P, Q: e.P + (e.Q - e.P) * t, cut: e.cut });
       ctx.save();
       ctx.clip(layer.reg.path);
-      if (!ft.lo || !ft.hi) { // はしのパート：つなぎめを動かさずに、全体を同じ倍率で大きく（小さく）する
+      const e0 = ft.lo || ft.hi;
+      if ((!ft.lo || !ft.hi) && e0.warp) {
+        // はしのパート（細かい所も合わせる）：絵をます目に分けて、つなぎめに近いますほど、目印が重なるように伸び縮みさせる
+        const dir = ft.lo ? 1 : -1, bt = 1 + (ft.sv - 1) * t, W = e0.warp, K = W.src.length;
+        const uni = (u) => e0.Q + e0.s * (u - e0.P); // 今までの合わせ方（全体を同じ倍率で）
+        const g = (u) => { // 目印を重ねる合わせ方
+          if (u <= W.src[0]) return W.dst[0] + e0.s * (u - W.src[0]);
+          if (u >= W.src[K - 1]) return W.dst[K - 1] + e0.s * (u - W.src[K - 1]);
+          let m = 1;
+          while (W.src[m] < u) m++;
+          return W.dst[m - 1] + (W.dst[m] - W.dst[m - 1]) * (u - W.src[m - 1]) / (W.src[m] - W.src[m - 1]);
+        };
+        const breaks = [-300, ...W.src, layout.edgeLen + 300];
+        for (let sIdx = 0; sIdx <= WARP_STRIPS; sIdx++) {
+          const d0 = sIdx * WARP_FADE / WARP_STRIPS, d1 = sIdx < WARP_STRIPS ? d0 + WARP_FADE / WARP_STRIPS : 4000;
+          const w = sIdx < WARP_STRIPS ? 1 - (sIdx + 0.5) / WARP_STRIPS : 0; // つなぎめから離れるほど、弱くする
+          const F = (u) => u + t * (uni(u) + w * (g(u) - uni(u)) - u);
+          const V = (d) => e0.cut + dir * d * bt;
+          for (let c = 0; c < breaks.length - 1; c++) {
+            const u0 = breaks[c], u1 = breaks[c + 1], U0 = F(u0), U1 = F(u1);
+            if (U1 - U0 < 0.01) continue;
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.beginPath();
+            [[U0 - 0.6, V(d0) - dir * 0.6], [U1 + 0.6, V(d0) - dir * 0.6], [U1 + 0.6, V(d1) + dir * 0.6], [U0 - 0.6, V(d1) + dir * 0.6]].forEach(([u, v], idx) => {
+              const [x, y] = toWorld(f, u, v);
+              if (idx) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+            });
+            ctx.clip();
+            setWarp((U1 - U0) / (u1 - u0), bt, U0, u0, e0.cut);
+            ctx.drawImage(layer.cv, b.x, b.y);
+            ctx.restore();
+          }
+        }
+      } else if (!ft.lo || !ft.hi) { // はしのパート：つなぎめを動かさずに、全体を同じ倍率で大きく（小さく）する
         const e = mix(ft.lo || ft.hi);
         setWarp(e.s, 1 + (ft.sv - 1) * t, e.Q, e.P, e.cut);
         ctx.drawImage(layer.cv, b.x, b.y);
