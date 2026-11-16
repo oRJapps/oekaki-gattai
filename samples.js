@@ -118,12 +118,15 @@ const VER = new URL(import.meta.url).search;
 const loaded = {}; // ファイル名 → その中の絵（お題 → 絵を作る関数）
 
 // お題の見本の絵（線とぬった面のならび）を読みこむ。file = samples/ の中のファイル名。見本がないときは null
-export async function loadSample(topic, file) {
+// flip = true のときは、左右を逆にする（右向きに描いた絵を、左向きで出す）
+export async function loadSample(topic, file, flip = false) {
   if (!file || !/^[a-z0-9]+$/.test(file)) return null;
   try {
     if (!loaded[file]) loaded[file] = (await import(`./samples/${file}.js${VER}`)).default(KIT);
     const make = loaded[file][topic];
-    return make ? make().flat(Infinity).filter(Boolean) : null;
+    if (!make) return null;
+    const ops = make().flat(Infinity).filter(Boolean);
+    return flip ? ops.map((op) => ({ ...op, p: op.p.map((v, i) => (i % 2 ? v : 1000 - v)) })) : ops;
   } catch (err) {
     console.warn('sample', file, err);
     return null;

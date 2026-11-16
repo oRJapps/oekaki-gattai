@@ -70,12 +70,12 @@ function background(c, H) {
 }
 
 // drawing：合体した絵のキャンバス（形は自由）、topic：お題、credits：[{ text: '上：なまえ', color }, ...]
-// extra：{ score: 点数（数字）、sample: 見本の絵のキャンバス（なければ null） }
+// extra：{ score: 点数（数字）、scoreLabel: 点数の名前、sample: 見本の絵のキャンバス（なければ null） }
 export async function makeCard(drawing, topic, credits, extra = {}) {
   // タイトルの丸い文字を、キャンバスに描く前に読みこんでおく（読みこめなくても、ほかの文字で描く）
   try {
     await Promise.all([
-      document.fonts.load(`80px "Mochiy Pop One"`, 'お絵かき合体お題つながり度点おてほん#0123456789' + topic),
+      document.fonts.load(`80px "Mochiy Pop One"`, 'お絵かき合体お題つながり度そっくり点おてほん#0123456789' + topic),
       document.fonts.load(`700 30px "Zen Maru Gothic"`, credits.map((k) => k.text).join('') + 'orjapps'),
     ]);
   } catch (e) { /* そのまま進む */ }
@@ -152,7 +152,7 @@ export async function makeCard(drawing, topic, credits, extra = {}) {
     roundRect(c, -150, -52, 300, 104, 22); c.fillStyle = GOLD; c.fill();
     c.lineWidth = 6; c.strokeStyle = INK; c.stroke();
     c.font = `22px ${DISPLAY}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = INK;
-    c.fillText('つながり度', 0, -26);
+    c.fillText(extra.scoreLabel || 'つながり度', 0, -26);
     sticker(c, `${extra.score}点`, 0, 16, 50, RED, 10, 5);
     c.restore();
   }

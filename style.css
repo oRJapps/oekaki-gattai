@@ -339,3 +339,6 @@ button { font-family: var(--body); cursor: pointer; -webkit-tap-highlight-color:
 .board b { font-size: clamp(26px, min(17vw, calc(150vw / var(--len, 4))), min(108px, calc(900px / var(--len, 4)))); }
 .board.small b { font-size: clamp(18px, calc(96vw / var(--len, 4)), min(46px, calc(560px / var(--len, 4)))); }
 .sample figcaption { overflow-wrap: anywhere; }
+/* お題にそえる向き（正面・左向きなど） */
+.board .dir { font-style: normal; font-family: var(--display); font-size: 22px; color: var(--ink); background: var(--gold); border-radius: 999px; padding: 2px 16px; margin-top: 6px; }
+.board.small .dir { font-size: 14px; padding: 1px 10px; margin-top: 0; white-space: nowrap; align-self: center; }

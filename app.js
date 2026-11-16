@@ -1,17 +1,17 @@
 // app.js
 // 画面とゲームの流れ。企画の図のとおりに進む：
-//   S（シングル）  → 難易度 A/B/C → ひとりで合体（2つのパートを順番に描く）
+//   S（シングル）  → 難易度 A/B/C → CPUと合体（片方を描くと、もう片方をCPUが自動で描く）
 //   対（対戦）     → 難易度 A/B/C → オンライン（同じ難易度の部屋へ自動で入る）
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile } from './topics.js?v=20261116181111';
-import { loadSample } from './samples.js?v=20261116181111';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal } from './draw.js?v=20261116181111';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116181111';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116181111';
-import { makeCard } from './card.js?v=20261116181111';
-import * as net from './net.js?v=20261116181111';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116191912';
+import { loadSample } from './samples.js?v=20261116191912';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116191912';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116191912';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116191912';
+import { makeCard } from './card.js?v=20261116191912';
+import * as net from './net.js?v=20261116191912';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -196,8 +196,11 @@ const head = (title, sub) => h('header', { class: 'head' }, h('h2', { class: 'ri
 // 大きなメニューのカード（色、絵、タイトル、説明）
 const card = (color, art, title, sub, onclick, extra) => h('button', { class: 'card', style: `--c:${color}`, onclick },
   h('span', { class: 'card-art' }, art), h('span', { class: 'card-text' }, h('b', {}, title), h('small', {}, sub)), extra || null);
+// 動物のお題には、描く向き（正面・左向きなど）をそえる
+const dirOf = (topic) => topicDir((parseTopic(topic) || { base: topic }).base);
 const board = (topic, small) => h('div', { class: 'board' + (small ? ' small' : '') },
-  h('small', {}, 'お題'), h('b', { id: 'topic', style: `--len:${Math.max(4, [...topic].length)}` }, topic));
+  h('small', {}, 'お題'), h('b', { id: 'topic', style: `--len:${Math.max(4, [...topic].length)}` }, topic),
+  dirOf(topic) ? h('em', { class: 'dir', id: 'topic-dir' }, `向き：${dirOf(topic)}`) : null);
 
 // ---------- 画面：タイトル ----------
 function titleScreen() {
@@ -214,7 +217,7 @@ function titleScreen() {
     h('p', { class: 'tagline' }, 'お題を分けて描いて、最後に1枚に合体！'),
     h('label', { class: 'nametag', for: 'name' }, h('span', {}, 'なまえ'), name),
     h('nav', { class: 'menu' },
-      card('#ff5d8f', icon('pen'), 'シングル', 'ひとりで2つ描いて合体', go(() => levelScreen('single'))),
+      card('#ff5d8f', icon('pen'), 'シングル', 'CPUと合体する', go(() => levelScreen('single'))),
       card('#3ec5ff', icon('people'), '対戦', '難易度と人数を選ぶと部屋に入る', go(() => levelScreen('online'))),
       card('#3ddc84', icon('key'), 'フレンド', 'カギで集まる', go(friendScreen))),
     h('p', { class: 'status ' + (net.online ? 'on' : 'off') }, h('i', {}),
@@ -224,7 +227,7 @@ function titleScreen() {
 }
 
 // ---------- 画面：難易度 A/B/C ----------
-// next：single = ひとりで合体 ／ online = オンラインの部屋へ ／ friend = 部屋を作ってカギを発行
+// next：single = CPUと合体 ／ online = オンラインの部屋へ ／ friend = 部屋を作ってカギを発行
 const LEVEL_LOOK = { A: ['#3ddc84', 'rows', 1], B: ['#ff9a3c', 'diag', 2], C: ['#ff5252', 'diagR', 3] };
 function levelScreen(next) {
   const title = { single: 'シングル', online: '対戦', friend: '部屋を作る' }[next];
@@ -352,6 +355,9 @@ function keyScreen() {
 const myState = () => ({ id: me.id, pub: me.pub, name: me.name, joinedAt: G.joinedAt, ready: G.ready, phase: G.phase });
 // この部屋の人数（部屋を作った人が決めた数。分からないときは5人）
 const cap = () => Math.min(MAX_PLAYERS, Math.max(2, (G.room && G.room.size) || MAX_PLAYERS));
+// ラウンドを始める係：部屋にいる人の中で、id がいちばん小さい人。
+// 席の順番は、入り直すと画面によって食いちがうことがある。id で決めれば、全員が同じ人をえらぶ
+const isStarter = () => G.players.length > 0 && G.players.map((q) => q.id).sort()[0] === me.id;
 const isHost = () => G.players.length > 0 && G.players[0].id === me.id;
 function track() { if (G.chan) G.chan.update(myState()); }
 
@@ -479,7 +485,7 @@ function hostCheck() {
     G.startTimer = null;
     return;
   }
-  if (isHost()) { startRound(); return; }
+  if (isStarter()) { startRound(); return; }
   if (!G.startTimer) {
     G.startTimer = setTimeout(() => {
       G.startTimer = null;
@@ -540,13 +546,22 @@ function validStart(d, from) {
 }
 
 function handleStart(d, from) {
-  if (G.phase !== 'lobby') return;
+  // 「始める」が2つ重なったとき（2人がほぼ同時に始めたとき）：全員が、番号（id）の小さいほうのラウンドに合わせる。
+  // これがないと、人によって別々のラウンドになり、相手の絵が届かないまま「1/2人」で合体してしまう
+  const cur = G.round;
+  const swap = G.phase === 'intro' && !!cur && !cur.solo && typeof d.id === 'string' && d.id < cur.id;
+  if (G.phase !== 'lobby' && !swap) return;
   if (!validStart(d, from)) { log('rejected: invalid start'); return; }
+  if (swap) log(`start collision: switch ${cur.id} -> ${d.id}`);
   G.seenRounds.add(d.id);
   G.roomTopics.add(parseTopic(d.topic).base); // この部屋で出たお題。次からは出さない
   const index = d.order.findIndex((o) => o.id === me.id);
   // 自分が入っていない、または自分が「準備OK」を押していないラウンドには参加しない
-  if (index < 0 || !G.ready) { G.busy = true; G.lobbySig = ''; renderLobby(); return; }
+  if (index < 0 || (!G.ready && !swap)) {
+    if (swap) lobbyScreen(); // 合わせる先のラウンドに自分が入っていない：部屋の画面へもどる
+    G.busy = true; G.lobbySig = ''; renderLobby();
+    return;
+  }
   markTopic(d.topic);
   const nameOf = (o) => (G.players.find((p) => p.id === o.id) || {}).name || String(o.name == null ? '？' : o.name).slice(0, 12);
   beginRound({
@@ -620,14 +635,15 @@ function renderLobby() {
   );
 }
 
-// ---------- シングル（ひとりで合体） ----------
-// 1人で2つのパートを順番に描く。2つ目を描くときは、1つ目の絵は見えない
+// ---------- シングル（CPUと合体） ----------
+// 2つのパートのうち、片方だけを描く。もう片方は CPU が自動で描く（見本の絵の、そのパートの部分）
 function startSolo() {
   const topic = nextTopic(G.level);
   markTopic(topic);
+  const myPart = Math.random() < 0.5 ? 0 : 1;
   beginRound({
-    id: crypto.randomUUID(), topic, count: 2, layout: pickLayout(G.level, 2, WIDE_TOPICS.has(parseTopic(topic).base)), seconds: DRAW_SECONDS, solo: true, myPart: 0,
-    owners: [me.name, me.name],
+    id: crypto.randomUUID(), topic, count: 2, layout: pickLayout(G.level, 2, WIDE_TOPICS.has(parseTopic(topic).base)), seconds: DRAW_SECONDS, solo: true, myPart,
+    owners: myPart === 0 ? [me.name, 'CPU'] : ['CPU', me.name],
   });
 }
 
@@ -662,7 +678,7 @@ function introScreen() {
       h('div', {}, h('p', { class: 'lead' }, second ? 'つぎに描くのは' : 'あなたが描くのは'), h('p', { class: 'part-name' }, `「${regs[r.myPart].label}」`),
         h('p', { class: 'note', id: 'layout-name' }, `分け方：${LAYOUT_NAMES[G.layout.id]}（${r.count}つに分ける）`))),
     h('div', { class: 'fuse', 'aria-hidden': 'true' }, h('i', { style: `animation-duration:${INTRO_MS}ms` })),
-    h('p', { class: 'note' }, second ? 'さっき描いた絵は、合体まで見えません' : 'ほかのパートは、合体まで見えません'),
+    h('p', { class: 'note' }, r.solo ? 'もう片方は、CPUが描きます（合体まで見えません）' : 'ほかのパートは、合体まで見えません'),
     h('p', { class: 'note tip' }, 'コツ：金色の点線まで線をのばすと、となりの絵とつながります'),
   );
   later(drawScreen, INTRO_MS);
@@ -755,12 +771,7 @@ function submitPart() {
   clearTimers();
   sfx('done');
   G.parts[r.myPart] = ops;
-  if (r.solo) {
-    // シングル：次のパートがあれば、それを描く。全部描いたら合体
-    if (r.myPart < r.count - 1) { r.myPart++; G.submitted = false; G.pad = null; introScreen(); }
-    else revealScreen();
-    return;
-  }
+  if (r.solo) { revealScreen(); return; } // シングル：すぐ合体へ（もう片方は CPU が描く）
   G.phase = 'wait';
   track();
   const btn = document.getElementById('done-btn');
@@ -804,14 +815,14 @@ function checkAllParts() {
   if (needed.every((o) => G.done.has(o.id))) revealScreen();
 }
 
-// 点数にそえるひとこと
-const BEST_KEY = 'oekaki_best_score';
+// 点数（そっくり度）にそえるひとこと
+const BEST_KEY = 'oekaki_best_similarity';
 function rankWord(score) {
-  if (score >= 90) return 'ぴったり合体！';
-  if (score >= 75) return 'いいかんじ！';
-  if (score >= 55) return 'おしい！';
-  if (score >= 35) return 'ちぐはぐ合体！';
-  return 'バラバラ！それも味';
+  if (score >= 85) return '見本そっくり！';
+  if (score >= 65) return 'かなり似てる！';
+  if (score >= 45) return 'おしい！';
+  if (score >= 25) return 'ふんいきは出てる！';
+  return '新しい生き物が誕生！';
 }
 
 function revealScreen() {
@@ -824,34 +835,33 @@ function revealScreen() {
   track();
   const parts = [];
   for (let i = 0; i < r.count; i++) parts.push(G.parts[i] || []);
-  const seatColor = (i) => (r.solo ? SEATS[0].color : SEATS[i % SEATS.length].color);
+  const seatColor = (i) => (r.solo ? (r.owners[i] === 'CPU' ? '#b9c2e6' : SEATS[0].color) : SEATS[i % SEATS.length].color);
   const canvas = h('canvas', { class: 'pad', id: 'result' });
   const status = h('p', { class: 'merging', id: 'reveal-status', role: 'status' }, '合体中…');
   const caption = h('p', { class: 'chips', id: 'caption' },
     r.owners.map((name, i) => h('span', { class: 'chip', style: `--seat:${seatColor(i)}` }, h('i', { class: 'dot' }), `${regs[i].label}：${name}`)));
-  // 点数（つながり度）。合体が終わったら出す
+  // 点数（そっくり度：見本にどれだけ近いか）。合体が終わったら出す
   const scoreNum = h('b', { id: 'score' }, '0');
   const rank = h('em', { id: 'rank' }, '');
   const scoreNote = h('p', { class: 'note', id: 'score-note' }, '');
   const scoreBox = h('div', { class: 'scorebox', id: 'scorebox', hidden: true },
-    h('small', {}, 'つながり度'), h('span', { class: 'points' }, scoreNum, '点'), rank);
+    h('small', { id: 'score-label' }, 'そっくり度'), h('span', { class: 'points' }, scoreNum, '点'), rank);
   // 見本（おてほん）。合体が終わったら、絵の左上に出す
   // 絵のファイルは、ここで読みこむ（合体のアニメーションの間に読み終わる）。組み合わせお題では、もとのお題の見本を出す
   const base = (parseTopic(r.topic) || { base: r.topic }).base;
   const sampleCv = h('canvas', {});
   let sampleReady = false;
-  loadSample(base, sampleFile(base)).then((ops) => {
-    if (!ops) return;
-    drawSample(sampleCv, ops, 300);
-    sampleReady = true;
-    if (finalScore != null && sampleBox) sampleBox.hidden = false; // 合体が先に終わっていたら、ここで出す
+  let scoreLabel = 'そっくり度', sampleOpsAll = null;
+  const sampleLoaded = loadSample(base, sampleFile(base), sampleFlip(base)).then((ops) => {
+    if (ops) { drawSample(sampleCv, ops, 300); sampleReady = true; sampleOpsAll = ops; }
+    return ops;
   });
   // 押すと大きくなる（もう一度押すと小さくなる）
   const sampleBox = h('figure', { class: 'sample', id: 'sample', hidden: true, title: '押すと大きくなる', onclick: (e) => e.currentTarget.classList.toggle('big') }, sampleCv, h('figcaption', {}, base === r.topic ? 'おてほん' : `おてほん（${base}）`));
 
   let finalScore = null;
   // Xでシェア：お題と点数とハッシュタグとサイトのURLを入れる（なまえは入れない）
-  const shareText = () => `お題「${r.topic}」を分けて描いて合体したら、こうなった。${finalScore == null ? '' : `つながり度 ${finalScore}点！`}\n#お絵かき合体`;
+  const shareText = () => `お題「${r.topic}」を分けて描いて合体したら、こうなった。${finalScore == null ? '' : `${scoreLabel} ${finalScore}点！`}\n#お絵かき合体`;
   const xPostUrl = () => 'https://x.com/intent/post?text=' + encodeURIComponent(shareText() + '\n') + '&url=' + encodeURIComponent(SITE_URL);
   let cardBlob = null; // シェア用の画像。合体が終わったら先に作っておく
   const buttons = h('div', { class: 'actions' },
@@ -864,38 +874,52 @@ function revealScreen() {
   if (sampleBox) easel.append(sampleBox);
   show('reveal', board(r.topic, true), status, scoreBox, scoreNote, easel, caption, buttons);
   sfx('merge');
-  G.reveal = startReveal(canvas, G.layout, parts, {
-    onFit: () => { status.textContent = 'つなげています…'; },
-    onDone: (result) => {
-      finalScore = result.score;
-      status.textContent = '合体！';
-      status.className = 'stamp';
-      easel.classList.add('flash');
-      sfx('fanfare');
-      confetti();
-      if (sampleReady) sampleBox.hidden = false;
-      // 点数を 0 から数え上げる
-      scoreBox.hidden = false;
-      const began = Date.now();
-      const count = setInterval(() => {
-        const t = Math.min(1, (Date.now() - began) / 900);
-        scoreNum.textContent = String(Math.round(result.score * t));
-        if (t >= 1) clearInterval(count);
-      }, 30);
-      G.timers.push(count);
-      rank.textContent = rankWord(result.score);
-      let best = 0;
-      try { best = parseInt(localStorage.getItem(BEST_KEY), 10) || 0; } catch (e) { /* なくてもよい */ }
-      const joints = result.scores.length > 1 ? `つなぎめごと：${result.scores.map((s) => s + '点').join('・')}　` : '';
-      if (result.score > best) {
-        try { localStorage.setItem(BEST_KEY, String(result.score)); } catch (e) { /* 保存できなくてもよい */ }
-        scoreNote.textContent = joints + (best ? `自己ベスト更新！（前は ${best}点）` : 'これが最初の記録！');
-      } else {
-        scoreNote.textContent = joints + `自己ベスト：${best}点`;
-      }
-      makeBlob().then((blob) => { cardBlob = blob; }).catch(() => {});
-    },
-  });
+  // 合体が終わったら：見本とくらべて点数を出す
+  const finish = (result) => {
+    if (G.round !== r || G.phase !== 'reveal' || !G.reveal) return;
+    // 点数：見本にどれだけ近いか。見本がないときだけ、つながり度を点数にする
+    // シングル：自分が描いたパートだけを、見本の同じパートとくらべる（CPU のパートは見本そのものなので、点数に入れない）
+    if (sampleReady && r.solo) finalScore = similarity(partPicture(G.layout, r.myPart, parts[r.myPart]), partPicture(G.layout, r.myPart, sampleOpsAll));
+    else if (sampleReady) finalScore = similarity(G.reveal.toCanvas(), sampleCv);
+    else { finalScore = result.score; scoreLabel = 'つながり度'; document.getElementById('score-label').textContent = scoreLabel; }
+    status.textContent = '合体！';
+    status.className = 'stamp';
+    easel.classList.add('flash');
+    sfx('fanfare');
+    confetti();
+    if (sampleReady) sampleBox.hidden = false;
+    // 点数を 0 から数え上げる
+    scoreBox.hidden = false;
+    const began = Date.now();
+    const count = setInterval(() => {
+      const t = Math.min(1, (Date.now() - began) / 900);
+      scoreNum.textContent = String(Math.round(finalScore * t));
+      if (t >= 1) clearInterval(count);
+    }, 30);
+    G.timers.push(count);
+    rank.textContent = sampleReady ? rankWord(finalScore) : '';
+    let best = 0;
+    try { best = parseInt(localStorage.getItem(BEST_KEY), 10) || 0; } catch (e) { /* なくてもよい */ }
+    const joint = sampleReady ? `つながり度：${result.score}点　` : '';
+    if (finalScore > best) {
+      try { localStorage.setItem(BEST_KEY, String(finalScore)); } catch (e) { /* 保存できなくてもよい */ }
+      scoreNote.textContent = joint + (best ? `自己ベスト更新！（前は ${best}点）` : 'これが最初の記録！');
+    } else {
+      scoreNote.textContent = joint + `自己ベスト：${best}点`;
+    }
+    makeBlob().then((blob) => { cardBlob = blob; }).catch(() => {});
+  };
+  const begin = () => {
+    if (G.round !== r || G.phase !== 'reveal') return; // 読みこみの間に、ほかの画面へ行っていた
+    G.reveal = startReveal(canvas, G.layout, parts, {
+      onFit: () => { status.textContent = 'つなげています…'; },
+      onDone: (result) => { sampleLoaded.then(() => finish(result), () => finish(result)); },
+    });
+  };
+  if (r.solo) {
+    // シングル：CPU のパートは、見本の絵のその部分（パートの範囲の外は、自動で切り取られる）
+    sampleLoaded.then((ops) => { parts[1 - r.myPart] = ops || []; begin(); }, begin);
+  } else begin();
 
   // スマホ・タブレット：絵の画像つきで共有する（出てきた一覧から X をえらぶ）
   async function sharePhone() {
@@ -963,7 +987,7 @@ function revealScreen() {
   function resultCard() {
     return makeCard(G.reveal.toCanvas(), r.topic,
       r.owners.map((name, i) => ({ text: `${regs[i].label}：${name}`, color: seatColor(i) })),
-      { score: finalScore, sample: sampleReady ? sampleCv : null });
+      { score: finalScore, scoreLabel, sample: sampleReady ? sampleCv : null });
   }
 
   async function saveImage() {

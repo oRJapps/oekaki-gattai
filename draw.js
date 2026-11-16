@@ -1,5 +1,5 @@
 // draw.js
-// 絵を描く部分ぜんぶ：分け方（レイアウト）、描くキャンバス、ぬりつぶし、合体（自動でつなげる）、点数。
+// 絵を描く部分ぜんぶ：分け方（レイアウト）、描くキャンバス、ぬりつぶし、合体（自動でつなげる）、点数（見本に近いか）。
 //
 // 座標：1人ぶんのパネルは 1000×500（上下に分けるとき）か 500×1000（左右に分けるとき）。
 //       ななめに分けるとき（2人だけ）は 1000×1000 を三角2つに分ける。
@@ -122,6 +122,17 @@ export function drawStroke(ctx, s) {
   ctx.stroke();
 }
 
+// ぬった面：点をつないだ形の中をぬる（見本の絵で使う）
+function fillPolygon(c, s) {
+  c.globalCompositeOperation = 'source-over';
+  c.fillStyle = s.c;
+  c.beginPath();
+  c.moveTo(s.p[0], s.p[1]);
+  for (let i = 2; i < s.p.length; i += 2) c.lineTo(s.p[i], s.p[i + 1]);
+  c.closePath();
+  c.fill();
+}
+
 // 1人ぶんの絵をのせる透明な紙（レイヤー）。大きさはそのパートの範囲ぴったり
 class Layer {
   constructor(reg) {
@@ -147,6 +158,7 @@ class Layer {
 
   apply(op) {
     if (op.f) this.fill(op.x, op.y, op.c);
+    else if (op.g) this.inside((c) => fillPolygon(c, op)); // ぬった面（CPU が描く見本の絵で使う）
     else this.inside((c) => drawStroke(c, op));
   }
 
@@ -376,15 +388,7 @@ export function drawSample(canvas, ops, size = 300) {
   c.fillRect(0, 0, size, size);
   c.scale(size / 1000, size / 1000);
   ops.forEach((s) => {
-    if (!s.g) { drawStroke(c, s); return; }
-    // ぬった面（見本だけが使う）：点をつないだ形の中をぬる
-    c.globalCompositeOperation = 'source-over';
-    c.fillStyle = s.c;
-    c.beginPath();
-    c.moveTo(s.p[0], s.p[1]);
-    for (let i = 2; i < s.p.length; i += 2) c.lineTo(s.p[i], s.p[i + 1]);
-    c.closePath();
-    c.fill();
+    if (s.g) fillPolygon(c, s); else drawStroke(c, s);
   });
 }
 
@@ -444,11 +448,12 @@ function analyze(layout, layers) {
   layout.cuts.forEach((cut, k) => {
     const A = profile(layout, data, k, cut, -1), B = profile(layout, data, k + 1, cut, 1);
     let sA = 1, sB = 1;
-    const Q = A.n && B.n ? (A.c + B.c) / 2 : null;
+    // 大きいほうに合わせる：大きいほうの絵は動かさず、小さいほうの絵を大きくして、位置もそろえる（2倍まで）
+    const Q = A.n && B.n ? (A.len >= B.len ? A.c : B.c) : null;
     if (A.n && B.n && A.len >= 40 && B.len >= 40) {
-      const L = Math.sqrt(A.len * B.len); // 2人の「はば」のまんなか（倍率で見たまんなか）に合わせる
-      sA = clamp(L / A.len, 0.5, 2);
-      sB = clamp(L / B.len, 0.5, 2);
+      const L = Math.max(A.len, B.len);
+      sA = clamp(L / A.len, 1, 2);
+      sB = clamp(L / B.len, 1, 2);
     }
     if (Q !== null) {
       fit[k].hi = { s: sA, P: A.c, Q, cut };
@@ -503,7 +508,7 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
   const layers = layout.regions.map((r) => new Layer(r));
   const tasks = [];
   partsOps.forEach((ops, pi) => (ops || []).forEach((op) => {
-    if (op.f) tasks.push([pi, op, -1]);
+    if (op.f || op.g) tasks.push([pi, op, -1]);
     else for (let i = 0; i < op.p.length / 2; i++) tasks.push([pi, op, i]);
   }));
   const perFrame = Math.max(3, Math.ceil(tasks.length / 200)); // 描くところは全体で約3秒
@@ -605,4 +610,119 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
       return copy;
     },
   };
+}
+
+// ---------- 点数：見本にどれだけ近いか ----------
+// 絵の特ちょうを取り出す：形（絵がある場所。線でかこんだ中もふくむ）と、使っている色の割合。
+// 絵の大きさや位置のちがいで損をしないように、絵がある範囲だけを切り出して、同じ大きさ（48×48 におさまる大きさ）に直してからくらべる。
+const SIM = 48;
+function features(src) {
+  // まず 200×200 に直す。たてや横に長い絵（3人以上で合体した絵）は、ここで正方形に引きのばされる
+  const w = 200, h = 200;
+  const mid = newCanvas(w, h), mc = mid.getContext('2d', { willReadFrequently: true });
+  mc.fillStyle = '#fff';
+  mc.fillRect(0, 0, w, h);
+  mc.drawImage(src, 0, 0, w, h);
+  const md = mc.getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    if (md[i] < 235 || md[i + 1] < 235 || md[i + 2] < 235) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  if (x1 < x0 || y1 < y0) return null; // 何も描いていない
+  const cv = newCanvas(SIM, SIM), c = cv.getContext('2d', { willReadFrequently: true });
+  c.fillStyle = '#fff';
+  c.fillRect(0, 0, SIM, SIM);
+  // 絵がある範囲を、形（たてと横の比）を変えずに、48×48 のまんなかにおさめる
+  const bw = x1 - x0 + 1, bh = y1 - y0 + 1, sc = SIM / Math.max(bw, bh);
+  c.drawImage(mid, x0, y0, bw, bh, (SIM - bw * sc) / 2, (SIM - bh * sc) / 2, bw * sc, bh * sc);
+  const p = c.getImageData(0, 0, SIM, SIM).data, n = SIM * SIM;
+  const raw = new Uint8Array(n), hist = new Float32Array(14), kind = new Int8Array(n).fill(-1); // kind：そのマスの色の種類（-1 = 何もない）
+  let inkCount = 0;
+  for (let i = 0; i < n; i++) {
+    const r = p[i * 4], g = p[i * 4 + 1], b = p[i * 4 + 2];
+    if (r >= 238 && g >= 238 && b >= 238) continue;
+    raw[i] = 1;
+    inkCount++;
+    // 色の種類：0〜11 = 色あい（30度ずつ）、12 = 黒っぽい、13 = 灰色・白っぽい
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let bucket = 13;
+    if (max - min < 42) bucket = max < 120 ? 12 : 13;
+    else {
+      let hue = max === r ? ((g - b) / (max - min)) % 6 : max === g ? (b - r) / (max - min) + 2 : (r - g) / (max - min) + 4;
+      if (hue < 0) hue += 6;
+      bucket = Math.floor(hue * 2) % 12;
+    }
+    hist[bucket]++;
+    kind[i] = bucket;
+  }
+  for (let i = 0; i < hist.length; i++) hist[i] /= Math.max(1, inkCount);
+  // 線の小さなすきまをふさぐ（まわり1マスに広げる）。そのあと、外がわからたどれない所を「中」と見る
+  const ink = new Uint8Array(n);
+  for (let y = 0; y < SIM; y++) for (let x = 0; x < SIM; x++) {
+    if (!raw[y * SIM + x]) continue;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if (xx >= 0 && yy >= 0 && xx < SIM && yy < SIM) ink[yy * SIM + xx] = 1;
+    }
+  }
+  const outside = new Uint8Array(n), stack = [];
+  for (let i = 0; i < SIM; i++) stack.push(i, (SIM - 1) * SIM + i, i * SIM, i * SIM + SIM - 1);
+  while (stack.length) {
+    const i = stack.pop();
+    if (outside[i] || ink[i]) continue;
+    outside[i] = 1;
+    const x = i % SIM;
+    if (x > 0) stack.push(i - 1);
+    if (x < SIM - 1) stack.push(i + 1);
+    if (i >= SIM) stack.push(i - SIM);
+    if (i < n - SIM) stack.push(i + SIM);
+  }
+  const sil = new Uint8Array(n);
+  for (let i = 0; i < n; i++) sil[i] = outside[i] ? 0 : 1;
+  // 絵を 12×12 のますに分けて、ますごとに「いちばん多い色の種類」を調べる（どこに何色があるか）
+  //   -1 = 絵の外、14 = 線でかこんだ中だが、ぬっていない
+  const G8 = 12, step = SIM / G8, cells = new Int8Array(G8 * G8);
+  for (let cy = 0; cy < G8; cy++) for (let cx = 0; cx < G8; cx++) {
+    const count = new Uint16Array(16);
+    for (let y = cy * step; y < (cy + 1) * step; y++) for (let x = cx * step; x < (cx + 1) * step; x++) {
+      const i = y * SIM + x;
+      count[kind[i] >= 0 ? kind[i] : sil[i] ? 14 : 15]++;
+    }
+    let top = 15;
+    for (let b = 0; b < 15; b++) if (count[b] > count[top] * (top === 15 ? 0.5 : 1)) top = b; // 外（15）は、半分より多いときだけ「外」
+    cells[cy * G8 + cx] = top === 15 ? -1 : top;
+  }
+  return { sil, hist, cells };
+}
+
+// 見本にどれだけ近いか（0〜100点）。形が4割、色の割合が2割、色の場所が4割
+//   形：2つの絵を重ねたとき、どちらにも絵がある所の割合（80%重なれば満点）
+//   色の割合：使っている色の割合が、どれだけ同じか（75%同じなら満点）
+//   色の場所：12×12 のますごとに、同じ色の種類かどうか（となりの色あいなら半分）
+export function similarity(picture, sample) {
+  const a = features(picture), b = features(sample);
+  if (!a || !b) return 0;
+  let both = 0, either = 0;
+  for (let i = 0; i < a.sil.length; i++) { if (a.sil[i] || b.sil[i]) either++; if (a.sil[i] && b.sil[i]) both++; }
+  const shape = either ? both / either : 0;
+  let color = 0;
+  for (let i = 0; i < a.hist.length; i++) color += Math.min(a.hist[i], b.hist[i]);
+  let used = 0, same = 0;
+  for (let i = 0; i < a.cells.length; i++) {
+    const x = a.cells[i], y = b.cells[i];
+    if (x < 0 && y < 0) continue;
+    used++;
+    if (x === y) same += 1;
+    else if (x >= 0 && y >= 0 && x < 12 && y < 12 && Math.min(Math.abs(x - y), 12 - Math.abs(x - y)) === 1) same += 0.5;
+  }
+  const place = used ? same / used : 0;
+  return Math.round(100 * (0.4 * Math.pow(Math.min(1, shape / 0.8), 1.5) + 0.2 * Math.min(1, color / 0.75) + 0.4 * place));
+}
+
+// 1つのパートだけを描いた絵を作る（シングルで、自分のパートと見本の同じパートをくらべるときに使う）
+export function partPicture(layout, part, ops) {
+  const layer = new Layer(layout.regions[part]);
+  (ops || []).forEach((op) => layer.apply(op));
+  return layer.cv;
 }
