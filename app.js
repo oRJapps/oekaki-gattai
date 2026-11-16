@@ -5,19 +5,19 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116200953';
-import { loadSample, loadAlternates } from './samples.js?v=20261116200953';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116200953';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116200953';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116200953';
-import { makeCard } from './card.js?v=20261116200953';
-import * as net from './net.js?v=20261116200953';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116202113';
+import { loadSample, loadAlternates } from './samples.js?v=20261116202113';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116202113';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116202113';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116202113';
+import { makeCard } from './card.js?v=20261116202113';
+import * as net from './net.js?v=20261116202113';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
 // 描く時間は180秒。確認用に ?sec=10 のように短くできる
 const DRAW_SECONDS = Math.max(5, parseInt(params.get('sec'), 10) || 180);
-const INTRO_MS = 4000;
+const INTRO_MS = 5000; // お題とお手本を見せる時間。この間だけお手本が見える
 const SITE_URL = 'https://orjapps.github.io/oekaki-gattai/'; // シェアするときに入れる公開先
 // スマホかタブレットなら true（iPad は Mac と名のるので、タッチできるかどうかも見る）
 const IS_PHONE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
@@ -669,19 +669,28 @@ function introScreen() {
   clearTimers();
   G.phase = 'intro';
   track();
-  const second = r.solo && r.myPart > 0;
   const preview = h('canvas', { class: 'preview', id: 'preview' });
   drawLayoutPreview(preview, G.layout, r.myPart);
+  // お手本：最初の5秒だけ見せる（描く画面にうつると消える）。組み合わせお題では、ことばに合った飾りつきの絵
+  const parsed = parseTopic(r.topic) || { base: r.topic, mod: '' };
+  const modelCv = h('canvas', { width: 10, height: 10 });
+  const model = h('figure', { class: 'intro-sample', id: 'intro-sample', hidden: true }, modelCv, h('figcaption', {}, 'おてほん（5秒で消えます）'));
+  loadSample(parsed.base, sampleFile(parsed.base), sampleFlip(parsed.base), parsed.mod, topicDir(parsed.base) === '左向き').then((ops) => {
+    if (!ops || G.round !== r || G.phase !== 'intro') return;
+    drawSample(modelCv, ops, 360);
+    model.hidden = false;
+  });
   sfx('topic');
   show('intro-' + r.myPart,
     h('div', { class: 'spots', 'aria-hidden': 'true' }, h('i', {}), h('i', {})),
     board(r.topic, false),
+    model,
     h('div', { class: 'brief' }, preview,
-      h('div', {}, h('p', { class: 'lead' }, second ? 'つぎに描くのは' : 'あなたが描くのは'), h('p', { class: 'part-name' }, `「${regs[r.myPart].label}」`),
+      h('div', {}, h('p', { class: 'lead' }, 'あなたが描くのは'), h('p', { class: 'part-name' }, `「${regs[r.myPart].label}」`),
         h('p', { class: 'note', id: 'layout-name' }, `分け方：${LAYOUT_NAMES[G.layout.id]}（${r.count}つに分ける）`))),
     h('div', { class: 'fuse', 'aria-hidden': 'true' }, h('i', { style: `animation-duration:${INTRO_MS}ms` })),
     h('p', { class: 'note' }, r.solo ? 'もう片方は、CPUが描きます（合体まで見えません）' : 'ほかのパートは、合体まで見えません'),
-    h('p', { class: 'note tip' }, 'コツ：金色の点線まで線をのばすと、となりの絵とつながります'),
+    h('p', { class: 'note tip' }, 'お手本をよく見ておぼえよう。金色の点線まで線をのばすと、となりの絵とつながります'),
   );
   later(drawScreen, INTRO_MS);
 }
