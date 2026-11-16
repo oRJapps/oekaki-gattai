@@ -5,8 +5,8 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, TOPICS, WIDE_TOPICS, nextTopic, markTopic } from './topics.js?v=20261116163035';
-import { sampleOps } from './samples.js?v=20261116163035';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile } from './topics.js?v=20261116163035';
+import { loadSample } from './samples.js?v=20261116163035';
 import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal } from './draw.js?v=20261116163035';
 import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116163035';
 import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116163035';
@@ -197,7 +197,7 @@ const head = (title, sub) => h('header', { class: 'head' }, h('h2', { class: 'ri
 const card = (color, art, title, sub, onclick, extra) => h('button', { class: 'card', style: `--c:${color}`, onclick },
   h('span', { class: 'card-art' }, art), h('span', { class: 'card-text' }, h('b', {}, title), h('small', {}, sub)), extra || null);
 const board = (topic, small) => h('div', { class: 'board' + (small ? ' small' : '') },
-  h('small', {}, 'お題'), h('b', { id: 'topic' }, topic));
+  h('small', {}, 'お題'), h('b', { id: 'topic', style: `--len:${Math.max(4, [...topic].length)}` }, topic));
 
 // ---------- 画面：タイトル ----------
 function titleScreen() {
@@ -494,7 +494,7 @@ function startRound() {
   const topic = nextTopic(G.room.difficulty, G.roomTopics); // まだ出ていないお題からえらぶ
   sendSigned('start', {
     id: crypto.randomUUID(), topic, count: ps.length, seconds: DRAW_SECONDS,
-    layout: pickLayout(G.room.difficulty, ps.length, WIDE_TOPICS.has(topic)),
+    layout: pickLayout(G.room.difficulty, ps.length, WIDE_TOPICS.has(parseTopic(topic).base)),
     order: ps.map((p) => ({ id: p.id, name: p.name })),
   });
   net.api.updateRoom(G.room, { status: 'playing', player_count: ps.length });
@@ -532,7 +532,8 @@ function validStart(d, from) {
   if (!Array.isArray(d.order) || d.order.length < 2 || d.order.length > MAX_PLAYERS || d.count !== d.order.length) return false;
   const ids = d.order.map((o) => (o && typeof o.id === 'string' ? o.id : ''));
   if (new Set(ids).size !== ids.length || !ids.every((id) => G.keys.has(id)) || !ids.includes(from)) return false;
-  if (!(TOPICS[G.room.difficulty] || []).includes(d.topic)) return false;
+  const parsed = parseTopic(d.topic); // お題は、決まった一覧（と、決まったことばの組み合わせ）の中だけ
+  if (!parsed || parsed.level !== G.room.difficulty) return false;
   if (!layoutsFor(d.count).includes(d.layout)) return false;
   if (G.room.size && d.count !== cap()) return false; // 決めた人数で分ける
   return Number.isInteger(d.seconds) && d.seconds >= 5 && d.seconds <= 600;
@@ -542,7 +543,7 @@ function handleStart(d, from) {
   if (G.phase !== 'lobby') return;
   if (!validStart(d, from)) { log('rejected: invalid start'); return; }
   G.seenRounds.add(d.id);
-  G.roomTopics.add(d.topic); // この部屋で出たお題。次からは出さない
+  G.roomTopics.add(parseTopic(d.topic).base); // この部屋で出たお題。次からは出さない
   const index = d.order.findIndex((o) => o.id === me.id);
   // 自分が入っていない、または自分が「準備OK」を押していないラウンドには参加しない
   if (index < 0 || !G.ready) { G.busy = true; G.lobbySig = ''; renderLobby(); return; }
@@ -625,7 +626,7 @@ function startSolo() {
   const topic = nextTopic(G.level);
   markTopic(topic);
   beginRound({
-    id: crypto.randomUUID(), topic, count: 2, layout: pickLayout(G.level, 2, WIDE_TOPICS.has(topic)), seconds: DRAW_SECONDS, solo: true, myPart: 0,
+    id: crypto.randomUUID(), topic, count: 2, layout: pickLayout(G.level, 2, WIDE_TOPICS.has(parseTopic(topic).base)), seconds: DRAW_SECONDS, solo: true, myPart: 0,
     owners: [me.name, me.name],
   });
 }
@@ -835,11 +836,18 @@ function revealScreen() {
   const scoreBox = h('div', { class: 'scorebox', id: 'scorebox', hidden: true },
     h('small', {}, 'つながり度'), h('span', { class: 'points' }, scoreNum, '点'), rank);
   // 見本（おてほん）。合体が終わったら、絵の左上に出す
-  const sample = sampleOps(r.topic);
-  let sampleCv = null;
-  if (sample) { sampleCv = h('canvas', {}); drawSample(sampleCv, sample, 300); }
+  // 絵のファイルは、ここで読みこむ（合体のアニメーションの間に読み終わる）。組み合わせお題では、もとのお題の見本を出す
+  const base = (parseTopic(r.topic) || { base: r.topic }).base;
+  const sampleCv = h('canvas', {});
+  let sampleReady = false;
+  loadSample(base, sampleFile(base)).then((ops) => {
+    if (!ops) return;
+    drawSample(sampleCv, ops, 300);
+    sampleReady = true;
+    if (finalScore != null && sampleBox) sampleBox.hidden = false; // 合体が先に終わっていたら、ここで出す
+  });
   // 押すと大きくなる（もう一度押すと小さくなる）
-  const sampleBox = sampleCv ? h('figure', { class: 'sample', id: 'sample', hidden: true, title: '押すと大きくなる', onclick: (e) => e.currentTarget.classList.toggle('big') }, sampleCv, h('figcaption', {}, 'おてほん')) : null;
+  const sampleBox = h('figure', { class: 'sample', id: 'sample', hidden: true, title: '押すと大きくなる', onclick: (e) => e.currentTarget.classList.toggle('big') }, sampleCv, h('figcaption', {}, base === r.topic ? 'おてほん' : `おてほん（${base}）`));
 
   let finalScore = null;
   // Xでシェア：お題と点数とハッシュタグとサイトのURLを入れる（なまえは入れない）
@@ -865,7 +873,7 @@ function revealScreen() {
       easel.classList.add('flash');
       sfx('fanfare');
       confetti();
-      if (sampleBox) sampleBox.hidden = false;
+      if (sampleReady) sampleBox.hidden = false;
       // 点数を 0 から数え上げる
       scoreBox.hidden = false;
       const began = Date.now();
@@ -955,7 +963,7 @@ function revealScreen() {
   function resultCard() {
     return makeCard(G.reveal.toCanvas(), r.topic,
       r.owners.map((name, i) => ({ text: `${regs[i].label}：${name}`, color: seatColor(i) })),
-      { score: finalScore, sample: sampleCv });
+      { score: finalScore, sample: sampleReady ? sampleCv : null });
   }
 
   async function saveImage() {

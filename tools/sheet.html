@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- tools/sheet.html：見本の絵を一覧で見る（確認用）。http://localhost:5173/tools/sheet.html?f=plant&from=0 のように開く -->
+<meta charset="utf-8">
+<title>見本の一覧</title>
+<style>body{margin:0;background:#bbb;font:12px sans-serif}#g{display:grid;grid-template-columns:repeat(5,160px);gap:0}figure{margin:0;position:relative;width:160px;height:160px}canvas{width:158px;height:158px;display:block;border:1px solid #999}figcaption{position:absolute;left:2px;bottom:1px;background:rgba(255,255,255,.8);padding:0 3px}</style>
+<div id="g"></div>
+<script type="module">
+const q = new URLSearchParams(location.search), t = Date.now();
+const { topicsInFile } = await import('../topics.js?t=' + t);
+const { loadSample } = await import('../samples.js?t=' + t);
+const { drawSample } = await import('../draw.js?t=' + t);
+const file = q.get('f') || 'base', from = +q.get('from') || 0;
+for (const name of topicsInFile(file).slice(from, from + 20)) {
+  const cv = document.createElement('canvas'), fig = document.createElement('figure'), cap = document.createElement('figcaption');
+  const ops = await loadSample(name, file);
+  if (ops) drawSample(cv, ops, 316);
+  cap.textContent = name + (ops ? '' : '（なし）');
+  fig.append(cv, cap);
+  document.getElementById('g').append(fig);
+}
+document.title = 'ready';
+</script>

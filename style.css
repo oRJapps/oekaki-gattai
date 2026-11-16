@@ -335,3 +335,7 @@ button { font-family: var(--body); cursor: pointer; -webkit-tap-highlight-color:
 .tools .lead { text-align: center; }
 .size-input { width: 92px; text-align: center; background: var(--paper); color: var(--ink); border: 4px solid var(--ink); border-radius: 14px; font-family: var(--display); font-size: 36px; line-height: 1.2; padding: 4px 6px; box-shadow: 0 4px 0 var(--ink); }
 .unit { font-family: var(--display); font-size: 24px; color: #fff; text-shadow: var(--outline); }
+/* お題の文字が多いとき（組み合わせお題）は、文字を小さくして2行までにおさめる */
+.board b { font-size: clamp(26px, min(17vw, calc(150vw / var(--len, 4))), min(108px, calc(900px / var(--len, 4)))); }
+.board.small b { font-size: clamp(18px, calc(96vw / var(--len, 4)), min(46px, calc(560px / var(--len, 4)))); }
+.sample figcaption { overflow-wrap: anywhere; }
