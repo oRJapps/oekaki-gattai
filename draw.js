@@ -629,6 +629,7 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
 // 絵の特ちょうを取り出す：形（絵がある場所。線でかこんだ中もふくむ）と、使っている色の割合。
 // 絵の大きさや位置のちがいで損をしないように、絵がある範囲だけを切り出して、同じ大きさ（48×48 におさまる大きさ）に直してからくらべる。
 const SIM = 48;
+export const TOLS = { v: 1 }; // 線の場所のずれを、何マスまで「合っている」と見るか
 function features(src) {
   // まず 200×200 に直す。たてや横に長い絵（3人以上で合体した絵）は、ここで正方形に引きのばされる
   const w = 200, h = 200;
@@ -706,7 +707,23 @@ function features(src) {
     for (let b = 0; b < 15; b++) if (count[b] > count[top] * (top === 15 ? 0.5 : 1)) top = b; // 外（15）は、半分より多いときだけ「外」
     cells[cy * G8 + cx] = top === 15 ? -1 : top;
   }
-  return { sil, hist, cells };
+  // 線の場所：色の種類が変わる所（線そのもの、色と色のさかいめ、絵と外のさかいめ）。色をぬらない絵でも、これでくらべられる
+  const lab = (i) => (kind[i] >= 0 ? kind[i] : sil[i] ? 14 : 15);
+  const TOL = TOLS.v;
+  const edge = new Uint8Array(n), near = new Uint8Array(n); // near：線のまわり2マスまで広げたもの（少しのずれは、合っていると見る）
+  let edges = 0;
+  for (let y = 0; y < SIM; y++) for (let x = 0; x < SIM; x++) {
+    const i = y * SIM + x, v = lab(i);
+    if ((x < SIM - 1 && lab(i + 1) !== v) || (y < SIM - 1 && lab(i + SIM) !== v)) { edge[i] = 1; edges++; }
+  }
+  for (let y = 0; y < SIM; y++) for (let x = 0; x < SIM; x++) {
+    if (!edge[y * SIM + x]) continue;
+    for (let dy = -TOL; dy <= TOL; dy++) for (let dx = -TOL; dx <= TOL; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if (xx >= 0 && yy >= 0 && xx < SIM && yy < SIM) near[yy * SIM + xx] = 1;
+    }
+  }
+  return { sil, hist, cells, edge, near, edges };
 }
 
 // 見本にどれだけ近いか（0〜100点）。形が3割、色の割合が2割、色の場所が5割（数字は下の SCORE）
@@ -739,14 +756,24 @@ export function similarity(picture, sample) {
   }
   const place = used ? same / used : 0;
   const raw = SCORE.wShape * Math.min(1, shape / SCORE.shapeFull) + SCORE.wColor * Math.min(1, color / SCORE.colorFull) + SCORE.wPlace * place;
-  return Math.round(100 * Math.pow(Math.max(0, Math.min(1, (raw - SCORE.low) / (SCORE.full - SCORE.low))), SCORE.curve));
+  const colored = Math.pow(Math.max(0, Math.min(1, (raw - SCORE.low) / (SCORE.full - SCORE.low))), SCORE.curve);
+  // 線だけでくらべた点数（色は見ない）：形の重なりと、線の場所がどれだけ合っているか。
+  // 色をぬらずに黒い線だけで描いた絵でも、似ていれば点数が出るように、色つきの点数と高いほうを使う
+  let hitA = 0, hitB = 0;
+  for (let i = 0; i < a.edge.length; i++) { if (a.edge[i] && b.near[i]) hitA++; if (b.edge[i] && a.near[i]) hitB++; }
+  const pa = a.edges ? hitA / a.edges : 0, pb = b.edges ? hitB / b.edges : 0; // pa：描いた線が見本の線の近くにある割合、pb：見本の線が描かれている割合
+  const lines = pa + pb ? (2 * pa * pb) / (pa + pb) : 0;
+  const rawLine = SCORE.lineShape * Math.min(1, shape / SCORE.shapeFull) + (1 - SCORE.lineShape) * lines;
+  const lined = Math.pow(Math.max(0, Math.min(1, (rawLine - SCORE.lineLow) / (SCORE.lineFull - SCORE.lineLow))), SCORE.curve);
+  return Math.round(100 * Math.max(colored, lined));
 }
 // 点数のきびしさ。人が指で描いた絵でも点数が出るように、やさしめにしてある
 //   shapeFull：形がこれだけ重なれば満点／colorFull：色の割合がこれだけ同じなら満点
 //   near1・near2・far：色あいが 1つとなり・2つとなり・それより遠いときの部分点／inside：線だけ、ぬっていないときの部分点
 //   ink：黒い線と色つきの所の部分点／low：合計がこれ以下なら0点（らくがきに点数を出さないため）
+//   lineShape：線だけの点数のうち、形の重なりの割合／lineLow・lineFull：線だけの点数の 0点・100点の位置
 //   full：合計がこれだけあれば100点／curve：1より小さいほど、まんなかの点数が上がる
-export const SCORE = { wShape: 0.3, wColor: 0.2, wPlace: 0.5, shapeFull: 0.8, colorFull: 0.6, near1: 0.85, near2: 0.6, far: 0.15, inside: 0.8, ink: 0.2, low: 0.25, full: 0.9, curve: 0.7 };
+export const SCORE = { wShape: 0.3, wColor: 0.2, wPlace: 0.5, shapeFull: 0.8, colorFull: 0.6, near1: 0.85, near2: 0.6, far: 0.15, inside: 0.3, ink: 0.15, low: 0.25, full: 0.9, curve: 0.7, lineShape: 0, lineLow: 0.3, lineFull: 0.85 };
 
 // 1つのパートだけを描いた絵を作る（シングルで、自分のパートと見本の同じパートをくらべるときに使う）
 export function partPicture(layout, part, ops) {
