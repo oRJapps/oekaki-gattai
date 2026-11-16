@@ -136,3 +136,17 @@ export async function loadSample(topic, file, flip = false, mod = '', left = fal
     return null;
   }
 }
+
+// 点数をつけるときに、見本のほかに「これでも正解」とする絵。組み合わせお題のときだけ。
+// 飾り（リボンなど）をつける場所は人によってちがうので、場所がちがっても損をしないようにする。
+//   weight = その絵とくらべた点数にかける数（飾りなしの絵は 0.9：飾りを描いたほうが少し有利）
+export async function loadAlternates(topic, file, flip = false, mod = '', left = false) {
+  if (!mod) return [];
+  const out = [];
+  try {
+    const plain = await loadSample(topic, file, flip);
+    if (plain) out.push({ ops: plain, weight: 0.9 });
+    if (mod === 'リボンを付けた' && plain && loaded.mods && loaded.mods.hasNeck(topic)) out.push({ ops: loaded.mods.decorate(plain, mod, topic, left, 'neck'), weight: 1 });
+  } catch (err) { console.warn('alternates', err); }
+  return out;
+}

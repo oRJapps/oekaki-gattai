@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116193116';
-import { loadSample } from './samples.js?v=20261116193116';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116193116';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116193116';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116193116';
-import { makeCard } from './card.js?v=20261116193116';
-import * as net from './net.js?v=20261116193116';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116200040';
+import { loadSample, loadAlternates } from './samples.js?v=20261116200040';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116200040';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116200040';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116200040';
+import { makeCard } from './card.js?v=20261116200040';
+import * as net from './net.js?v=20261116200040';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -853,8 +853,11 @@ function revealScreen() {
   const sampleCv = h('canvas', {});
   let sampleReady = false;
   let scoreLabel = 'そっくり度', sampleOpsAll = null;
-  const sampleLoaded = loadSample(base, sampleFile(base), sampleFlip(base), parsed.mod, topicDir(base) === '左向き').then((ops) => {
+  const isLeft = topicDir(base) === '左向き';
+  let alternates = []; // 見本のほかに「これでも正解」とする絵（リボンを首につけた絵、飾りなしの絵）
+  const sampleLoaded = loadSample(base, sampleFile(base), sampleFlip(base), parsed.mod, isLeft).then(async (ops) => {
     if (ops) { drawSample(sampleCv, ops, 300); sampleReady = true; sampleOpsAll = ops; }
+    if (ops && parsed.mod) alternates = await loadAlternates(base, sampleFile(base), sampleFlip(base), parsed.mod, isLeft);
     return ops;
   });
   // 押すと大きくなる（もう一度押すと小さくなる）
@@ -880,8 +883,19 @@ function revealScreen() {
     if (G.round !== r || G.phase !== 'reveal' || !G.reveal) return;
     // 点数：見本にどれだけ近いか。見本がないときだけ、つながり度を点数にする
     // シングル：自分が描いたパートだけを、見本の同じパートとくらべる（CPU のパートは見本そのものなので、点数に入れない）
-    if (sampleReady && r.solo) finalScore = similarity(partPicture(G.layout, r.myPart, parts[r.myPart]), partPicture(G.layout, r.myPart, sampleOpsAll));
-    else if (sampleReady) finalScore = similarity(G.reveal.toCanvas(), sampleCv);
+    // 組み合わせお題：飾りの場所は人によってちがう（リボンは耳にも首にも尻尾にもつける）ので、
+    // 「これでも正解」の絵ともくらべて、いちばん高い点数を使う
+    if (sampleReady) {
+      const refs = [{ ops: sampleOpsAll, weight: 1 }, ...alternates];
+      const mine = r.solo ? partPicture(G.layout, r.myPart, parts[r.myPart]) : G.reveal.toCanvas();
+      finalScore = Math.max(...refs.map((ref) => {
+        let target;
+        if (r.solo) target = partPicture(G.layout, r.myPart, ref.ops);
+        else if (ref.ops === sampleOpsAll) target = sampleCv;
+        else { target = document.createElement('canvas'); drawSample(target, ref.ops, 300); }
+        return Math.round(similarity(mine, target) * ref.weight);
+      }));
+    }
     else { finalScore = result.score; scoreLabel = 'つながり度'; document.getElementById('score-label').textContent = scoreLabel; }
     status.textContent = '合体！';
     status.className = 'stamp';

@@ -74,6 +74,15 @@ const MODS = {
   thing: ['巨大な', 'リボンをかけた', '雪が積もった', '凍った', 'ピカピカ光る', '翼の生えた', '空に浮かぶ',
     'クリスマスの飾りを付けた', 'ハロウィンの飾りを付けた', 'サンタ帽子をかぶせた'],
 };
+// 首にまくことば（ネクタイ、マフラー）は、首がはっきりある動物にだけつける。
+// サソリや魚のように首がない動物には、つけない（「ネクタイを締めたサソリ」は出さない）
+const NECK_MODS = new Set(['マフラーを巻いた', 'ネクタイを締めた']);
+const HAS_NECK = new Set(['ネコ', 'イヌ', 'ウサギ', 'クマ', 'パンダ', 'サル', 'コアラ', 'タヌキ', 'キツネ', 'ライオン', 'ゴリラ', 'ペンギン', 'カッパ', 'クジャク',
+  'キリン', 'ウマ', 'シマウマ', 'ユニコーン', 'ラクダ', 'シカ', 'オオカミ', 'トラ', 'ウシ', 'カンガルー', 'ダチョウ', 'フラミンゴ', 'ツル', 'ハクチョウ', 'アヒル',
+  'ニワトリ', 'ハト', 'ワシ', '恐竜', 'ドラゴン', 'リス', 'ヒヨコ', 'オウム']);
+// そのお題に、そのことばをつけてよいか
+const modFits = (mod, base) => !NECK_MODS.has(mod) || HAS_NECK.has(base);
+
 // 組み合わせお題が出る割合（難易度ごと）
 const COMBO_RATE = { A: 0.2, B: 0.35, C: 0.45 };
 const XMAS = /サンタ|クリスマス|雪/, HALLOWEEN = /ハロウィン|魔女|お化け/;
@@ -83,10 +92,11 @@ export function pick(list) {
 }
 
 // ことばを1つえらぶ。12月はクリスマス、10月はハロウィンのことばが出やすい（3倍）
-function pickMod(kind) {
+function pickMod(kind, base) {
   const month = new Date().getMonth() + 1;
   const pool = [];
   for (const m of MODS[kind]) {
+    if (!modFits(m, base)) continue;
     const boost = (month === 12 && XMAS.test(m)) || (month === 10 && HALLOWEEN.test(m)) ? 3 : 1;
     for (let i = 0; i < boost; i++) pool.push(m);
   }
@@ -118,7 +128,7 @@ export const topicsInFile = (file) => Object.keys(INFO).filter((name) => INFO[na
 export const sampleFile = (base) => (INFO[base] ? INFO[base].file : null);
 
 // そのお題につけられることばの一覧（確認用）
-export const MODS_FOR = (base) => (INFO[base] && MODS[INFO[base].kind]) || [];
+export const MODS_FOR = (base) => ((INFO[base] && MODS[INFO[base].kind]) || []).filter((mod) => modFits(mod, base));
 
 // お題の文字から、もとのお題（base）と、前につけたことば（mod）を取り出す。知らないお題なら null
 export function parseTopic(text) {
@@ -128,7 +138,7 @@ export function parseTopic(text) {
     for (const mod of MODS[kind]) {
       if (!text.startsWith(mod)) continue;
       const base = text.slice(mod.length), info = INFO[base];
-      if (info && info.kind === kind) return { base, mod, ...info };
+      if (info && info.kind === kind && modFits(mod, base)) return { base, mod, ...info };
     }
   }
   return null;
@@ -162,7 +172,7 @@ export function nextTopic(level, extra = new Set()) {
   }
   const base = pick(rest);
   const kind = INFO[base].kind;
-  if (MODS[kind] && Math.random() < (COMBO_RATE[level] || 0)) return pickMod(kind) + base;
+  if (MODS[kind] && Math.random() < (COMBO_RATE[level] || 0)) return pickMod(kind, base) + base;
   return base;
 }
 

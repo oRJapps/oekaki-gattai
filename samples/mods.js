@@ -26,6 +26,15 @@ export default (k) => {
     'チョウチンアンコウ': [420, 480, 230], 'マンボウ': [330, 480, 200], 'ユニコーン': [275, 290, 95], 'カッパ': [500, 300, 180],
   };
 
+  // 首の位置：[x, y, 飾りの大きさ]。ネクタイとマフラーは、かならずここにつける。首がはっきりある動物だけ（topics.js の HAS_NECK と同じ顔ぶれ）
+  const NECKS = {
+    'ネコ': [500, 512, 36], 'イヌ': [500, 560, 36], 'ウサギ': [500, 588, 34], 'クマ': [500, 515, 36], 'パンダ': [500, 515, 36], 'サル': [500, 515, 36], 'コアラ': [500, 518, 36], 'タヌキ': [500, 515, 36], 'キツネ': [500, 522, 36],
+    'ライオン': [500, 560, 36], 'ゴリラ': [500, 452, 38], 'ペンギン': [500, 400, 34], 'カッパ': [500, 462, 36], 'クジャク': [500, 492, 20],
+    'キリン': [425, 430, 26], 'ウマ': [362, 400, 28], 'シマウマ': [362, 400, 28], 'ユニコーン': [362, 400, 28], 'ラクダ': [285, 400, 22], 'シカ': [368, 400, 24], 'オオカミ': [388, 440, 32], 'トラ': [300, 600, 34],
+    'ウシ': [400, 560, 34], 'カンガルー': [395, 345, 26], 'ダチョウ': [345, 300, 16], 'フラミンゴ': [345, 390, 18], 'ツル': [352, 400, 16], 'ハクチョウ': [322, 470, 20], 'アヒル': [357, 470, 28],
+    'ニワトリ': [372, 485, 26], 'ハト': [362, 450, 28], 'ワシ': [400, 372, 30], '恐竜': [382, 430, 30], 'ドラゴン': [346, 450, 26], 'リス': [430, 540, 28], 'ヒヨコ': [475, 520, 34], 'オウム': [452, 386, 28],
+  };
+
   // 絵を小さくして動かす（飾りを置く場所をあけるため）
   const move = (ops, s, dx, dy) => ops.map((op) => ({ ...op, w: op.w ? Math.max(2, op.w * s) : op.w, p: op.p.map((v, i) => (i % 2 ? dy + v * s : dx + v * s)) }));
   // 絵がある範囲
@@ -141,7 +150,8 @@ export default (k) => {
   };
 
   // ---------- 組み合わせ ----------
-  function decorate(ops, mod, base, left) {
+  // variant：飾りをつける場所のちがい（'neck' = リボンを首につける）。点数をつけるとき、どの場所でも損をしないように使う
+  function decorate(ops, mod, base, left, variant = '') {
     const h = HEADS[base];
     // 頭の場所（絵を動かしたあとの場所に直す）
     const head = (s = 1, dx = 0, dy = 0) => {
@@ -151,7 +161,7 @@ export default (k) => {
     };
     const fit = (s, dx, dy) => move(ops, s, dx, dy);
     const hatAt = (hd) => [hd.x + (left ? hd.r * 0.12 : 0), hd.y - hd.r * 0.8];
-    const neckAt = (hd) => [hd.x + (left ? hd.r * 0.75 : 0), hd.y + hd.r * (left ? 0.85 : 0.98)];
+    const neck = NECKS[base]; // 首の位置（登録してある動物だけ）
 
     switch (mod) {
       // ----- 動物：かぶる・つける -----
@@ -159,10 +169,14 @@ export default (k) => {
       case '魔女の帽子をかぶった': { const o = fit(0.82, 90, 180), hd = head(0.82, 90, 180); return flat([o, witchHat(...hatAt(hd), hd.r * 0.4)]); }
       case '王冠をかぶった': { const o = fit(0.88, 60, 120), hd = head(0.88, 60, 120); return flat([o, crown(hatAt(hd)[0], hatAt(hd)[1] - hd.r * 0.05, hd.r * 0.42)]); }
       case '麦わら帽子をかぶった': { const o = fit(0.88, 60, 120), hd = head(0.88, 60, 120); return flat([o, strawHat(...hatAt(hd), hd.r * 0.42)]); }
-      case 'マフラーを巻いた': { const hd = head(); return flat([ops, scarf(...neckAt(hd), hd.r * 0.5)]); }
+      case 'マフラーを巻いた': return neck ? flat([ops, scarf(neck[0], neck[1], neck[2] * 1.25)]) : ops;
       case 'サングラスをかけた': { const hd = head(); return flat([ops, sunglasses(hd.x - (left ? hd.r * 0.25 : 0), hd.y - hd.r * 0.1, hd.r * (left ? 0.36 : 0.48))]); }
-      case 'リボンを付けた': { const hd = head(); return flat([ops, bow(hd.x + hd.r * 0.55, hd.y - hd.r * 0.78, Math.max(26, hd.r * 0.3))]); }
-      case 'ネクタイを締めた': { const hd = head(); return flat([ops, tie(...neckAt(hd), Math.max(30, hd.r * 0.36))]); }
+      case 'リボンを付けた': {
+        if (variant === 'neck' && neck) return flat([ops, bow(neck[0], neck[1], Math.max(24, neck[2] * 1.1))]); // 首につけたリボン
+        const hd = head();
+        return flat([ops, bow(hd.x + hd.r * 0.55, hd.y - hd.r * 0.78, Math.max(26, hd.r * 0.3))]); // 耳（頭）につけたリボン
+      }
+      case 'ネクタイを締めた': return neck ? flat([ops, tie(neck[0], neck[1], neck[2])]) : ops;
       // ----- 動物：持つ・ならぶ -----
       case '傘をさした': { const o = fit(0.72, 100, 270), hd = head(0.72, 100, 270), s = Math.max(60, hd.r * 0.8); return flat([o, umbrella(hd.x + hd.r * 0.95, hd.y - hd.r * 1.08 + 3.2 * s, s)]); } // 傘の下のはしが、頭のすぐ上にくる
       case '風船を持った': { const o = fit(0.76, 20, 235), b = box(o); return flat([o, balloon(Math.min(880, b.x1 + 40), b.cy + 40, 62)]); }
@@ -210,5 +224,5 @@ export default (k) => {
     }
   }
 
-  return { decorate };
+  return { decorate, hasNeck: (base) => !!NECKS[base] };
 };

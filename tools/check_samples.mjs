@@ -26,6 +26,8 @@ for (const topic of all) {
   }
 }
 console.log(`組み合わせお題 ${combos}通り`);
+for (const bad2 of ['ネクタイを締めたサソリ', 'マフラーを巻いた魚', 'ネクタイを締めたタコ']) if (parseTopic(bad2)) bad.push('出てはいけない：' + bad2);
+if (!parseTopic('ネクタイを締めたネコ')) bad.push('出るはず：ネクタイを締めたネコ');
 console.log(`お題 ${all.length}こ（初級${TOPICS.A.length}・中級${TOPICS.B.length}・上級${TOPICS.C.length}）／見本あり ${all.length - missing.length}こ`);
 if (missing.length) console.log('見本がない：' + missing.join('、'));
 if (bad.length) console.log('こわれている：' + bad.join('、'));
