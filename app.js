@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116200040';
-import { loadSample, loadAlternates } from './samples.js?v=20261116200040';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116200040';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116200040';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116200040';
-import { makeCard } from './card.js?v=20261116200040';
-import * as net from './net.js?v=20261116200040';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116200953';
+import { loadSample, loadAlternates } from './samples.js?v=20261116200953';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116200953';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116200953';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116200953';
+import { makeCard } from './card.js?v=20261116200953';
+import * as net from './net.js?v=20261116200953';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -352,7 +352,9 @@ function keyScreen() {
 }
 
 // ---------- 部屋（ロビー） ----------
-const myState = () => ({ id: me.id, pub: me.pub, name: me.name, joinedAt: G.joinedAt, ready: G.ready, phase: G.phase });
+// 自分の状態（部屋のみんなに知らせる）。phase は「部屋で待っている（lobby）」か「遊んでいる（play）」かだけを知らせる。
+// 細かく分けて知らせると送る回数がふえ、Supabase に接続を切られる（net.js の join の説明）
+const myState = () => ({ id: me.id, pub: me.pub, name: me.name, joinedAt: G.joinedAt, ready: G.ready, phase: G.phase === 'lobby' ? 'lobby' : 'play' });
 // この部屋の人数（部屋を作った人が決めた数。分からないときは5人）
 const cap = () => Math.min(MAX_PLAYERS, Math.max(2, (G.room && G.room.size) || MAX_PLAYERS));
 // ラウンドを始める係：部屋にいる人の中で、id がいちばん小さい人。
@@ -395,7 +397,7 @@ function hostBeat() {
 }
 
 // ---------- 在席の知らせ ----------
-const PHASES = ['lobby', 'intro', 'draw', 'wait', 'reveal'];
+const PHASES = ['lobby', 'play', 'intro', 'draw', 'wait', 'reveal']; // intro〜reveal は、古い版の画面が送ってくる
 const cleanPlayer = (p) => ({
   id: p.id, name: String(p.name == null ? '' : p.name).slice(0, 12) || '？',
   joinedAt: Number.isFinite(p.joinedAt) ? p.joinedAt : 0, ready: p.ready === true,

@@ -12,7 +12,7 @@
 //   join(roomId, state, on)    部屋に入る。on.presence(一覧) と on.event(種類, 中身) が呼ばれる
 //                              戻り値：{ send(種類, 中身), update(自分の状態), leave() }
 
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261116200040';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261116200953';
 
 // ?trial=1 をつけて開くと、Supabase を使わずにお試しモードで動く（動作の確認用）
 const forceTrial = new URLSearchParams(location.search).has('trial');
@@ -29,7 +29,7 @@ async function client() {
     if (!window.supabase) {
       await new Promise((resolve, reject) => {
         const tag = document.createElement('script');
-        tag.src = 'vendor/supabase.js?v=20261116200040';
+        tag.src = 'vendor/supabase.js?v=20261116200953';
         tag.onload = resolve;
         tag.onerror = () => reject(new Error('通信の部品を読みこめませんでした'));
         document.head.append(tag);
@@ -74,33 +74,81 @@ const supa = {
     if (!room || !room.secret) return;
     try { await rpc('close_room', { p_id: room.id, p_secret: room.secret }); } catch (err) { console.warn('close_room', err.message); }
   },
+  // 部屋につなぐ。
+  // 注意：Supabase は、自分の状態（Presence）を短い間に何回も送ると、部屋との接続を切る
+  //       （"Client presence rate limit exceeded"。手元の測定では、約7秒に6回で切られた）。
+  //       切られると、相手から見えなくなり、絵も届かなくなる。そこで：
+  //   1. 中身が同じ状態は送らない
+  //   2. 送る間かくを 2秒以上あける。さらに、10秒に3回までにする（こえるぶんは、あとで最新の状態を1回だけ送る）
+  //   3. それでも接続が切れたら、自動でつなぎ直して、状態を送り直す
   async join(roomId, state, on) {
     const c = await client();
-    const ch = c.channel('room:' + roomId, { config: { broadcast: { self: true }, presence: { key: state.id } } });
-    ch.on('presence', { event: 'sync' }, () => {
-      // 同じ名前で2つ以上の知らせがあっても全部わたす（どれが本物かは app.js が鍵で確かめる）
-      const list = Object.values(ch.presenceState()).flat();
-      on.presence(list);
-    });
-    ch.on('broadcast', { event: 'ev' }, ({ payload }) => on.event(payload.t, payload.d));
-    // 自分の状態は、つながるたびに送り直す（スマホで画面を切りかえると、接続が切れてつなぎ直しになるため）
-    let mine = state, live = false;
-    const push = () => { if (live) ch.track(mine).catch(() => {}); };
-    const onShow = () => { if (document.visibilityState === 'visible') push(); };
-    document.addEventListener('visibilitychange', onShow);
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('接続がタイムアウトしました')), 10000);
-      ch.subscribe((status) => {
-        // つながったら、すぐに部屋の画面へ進む（状態の送信が終わるのを待たない）
-        if (status === 'SUBSCRIBED') { clearTimeout(timer); live = true; push(); resolve(); }
-        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { live = false; clearTimeout(timer); reject(new Error('部屋に接続できませんでした')); }
-        else if (status === 'CLOSED') live = false;
+    const dbg = new URLSearchParams(location.search).has('debug') ? (text) => console.log('[net] ' + text) : () => {};
+    let ch = null, mine = state, live = false, left = false;
+    let sentText = '', sentTimes = [], sendTimer = null, retryTimer = null;
+
+    const flush = () => {
+      sendTimer = null;
+      if (!live || left) return;
+      const text = JSON.stringify(mine);
+      if (text === sentText) return; // 前に送ったものと同じ
+      const now = Date.now();
+      sentTimes = sentTimes.filter((t) => now - t < 10000);
+      const wait = Math.max(sentTimes.length ? sentTimes[sentTimes.length - 1] + 2000 - now : 0, sentTimes.length >= 3 ? sentTimes[0] + 10000 - now : 0);
+      if (wait > 0) { sendTimer = setTimeout(flush, wait + 20); return; }
+      sentTimes.push(now);
+      sentText = text;
+      ch.track(mine).then((res) => dbg('track -> ' + JSON.stringify(res) + ' ready=' + mine.ready + ' phase=' + mine.phase), (err) => dbg('track error ' + err));
+    };
+    const push = () => { if (!sendTimer) flush(); };
+
+    // つなぐ（切れたときは、もう一度これを呼ぶ）。first：最初の1回が成功したか失敗したかを知らせる
+    const connect = (first) => {
+      if (left) return;
+      ch = c.channel('room:' + roomId, { config: { broadcast: { self: true }, presence: { key: state.id } } });
+      const mineCh = ch;
+      ch.on('presence', { event: 'sync' }, () => {
+        if (mineCh !== ch) return;
+        // 同じ名前で2つ以上の知らせがあっても全部わたす（どれが本物かは app.js が鍵で確かめる）
+        const list = Object.values(mineCh.presenceState()).flat();
+        dbg('presence sync: ' + list.map((q) => String(q.name) + '/' + q.ready + '/' + q.phase).join(', '));
+        on.presence(list);
       });
-    });
+      ch.on('broadcast', { event: 'ev' }, ({ payload }) => { if (mineCh === ch) on.event(payload.t, payload.d); });
+      ch.on('system', {}, (m) => dbg('system ' + JSON.stringify(m).slice(0, 200)));
+      const timer = first ? setTimeout(() => first.reject(new Error('接続がタイムアウトしました')), 10000) : null;
+      ch.subscribe((status, err) => {
+        if (mineCh !== ch || left) return;
+        dbg('subscribe status ' + status + (err ? ' ' + err : ''));
+        if (status === 'SUBSCRIBED') {
+          // つながったら、すぐに部屋の画面へ進む（状態の送信が終わるのを待たない）
+          clearTimeout(timer);
+          live = true;
+          sentText = ''; // つなぎ直したあとは、同じ中身でも送り直す
+          push();
+          if (first) { first.resolve(); first = null; }
+          return;
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          live = false;
+          clearTimeout(timer);
+          if (first) { const f = first; first = null; f.reject(new Error('部屋に接続できませんでした')); return; }
+          // 部屋にいる間に切れた：古い接続を片づけて、2.5秒後につなぎ直す
+          clearTimeout(retryTimer);
+          retryTimer = setTimeout(() => {
+            if (left || mineCh !== ch) return;
+            dbg('reconnect');
+            try { c.removeChannel(mineCh); } catch (e) { /* もう切れている */ }
+            connect(null);
+          }, 2500);
+        }
+      });
+    };
+    await new Promise((resolve, reject) => connect({ resolve, reject }));
     return {
       send: (t, d) => ch.send({ type: 'broadcast', event: 'ev', payload: { t, d } }),
       update: (next) => { mine = next; push(); },
-      leave: () => { live = false; document.removeEventListener('visibilitychange', onShow); return c.removeChannel(ch); },
+      leave: () => { left = true; live = false; clearTimeout(sendTimer); clearTimeout(retryTimer); return c.removeChannel(ch); },
     };
   },
 };
