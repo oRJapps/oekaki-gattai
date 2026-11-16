@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, TOPICS, WIDE_TOPICS, nextTopic, markTopic } from './topics.js?v=20261116160722';
-import { sampleOps } from './samples.js?v=20261116160722';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal } from './draw.js?v=20261116160722';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116160722';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116160722';
-import { makeCard } from './card.js?v=20261116160722';
-import * as net from './net.js?v=20261116160722';
+import { LEVELS, TOPICS, WIDE_TOPICS, nextTopic, markTopic } from './topics.js?v=20261116161304';
+import { sampleOps } from './samples.js?v=20261116161304';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal } from './draw.js?v=20261116161304';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116161304';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116161304';
+import { makeCard } from './card.js?v=20261116161304';
+import * as net from './net.js?v=20261116161304';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -215,7 +215,7 @@ function titleScreen() {
     h('label', { class: 'nametag', for: 'name' }, h('span', {}, 'なまえ'), name),
     h('nav', { class: 'menu' },
       card('#ff5d8f', icon('pen'), 'シングル', 'ひとりで2つ描いて合体', go(() => levelScreen('single'))),
-      card('#3ec5ff', icon('people'), '対戦', '難易度を選ぶと部屋に入る', go(() => levelScreen('online'))),
+      card('#3ec5ff', icon('people'), '対戦', '難易度と人数を選ぶと部屋に入る', go(() => levelScreen('online'))),
       card('#3ddc84', icon('key'), 'フレンド', 'カギで集まる', go(friendScreen))),
     h('p', { class: 'status ' + (net.online ? 'on' : 'off') }, h('i', {}),
       net.online ? 'オンライン：みんなとつながります' : 'お試しモード：同じブラウザの別タブ同士だけつながります'),
@@ -241,25 +241,65 @@ function levelScreen(next) {
   );
 }
 
-async function chooseLevel(next, level) {
+function chooseLevel(next, level) {
   G.level = level;
   if (next === 'single') { G.mode = 'single'; startSolo(); return; }
-  G.mode = next;
-  show('loading', h('div', { class: 'loading' }, h('i', {}), h('i', {}), h('i', {})), h('p', { class: 'lead' }, '部屋をさがしています…'));
-  try {
-    let room = next === 'online' ? await net.api.findRoom(level) : null;
-    if (!room) {
-      room = await net.api.createRoom({
-        // Supabase ではカギをサーバーが決める。この code は、お試しモードのときだけ使われる
-        code: next === 'friend' ? String(Math.floor(1000 + Math.random() * 9000)) : null,
-        mode: next, difficulty: level, status: 'waiting', player_count: 1,
-      });
+  setupScreen(next, level);
+}
+
+// ---------- 画面：人数とカギを決める ----------
+// 対戦：人数だけ決める（同じ難易度・同じ人数の部屋に入る）。フレンド：人数と、4けたのカギを自分で決める
+function setupScreen(next, level, keep = {}) {
+  let size = keep.size || 2;
+  const row = h('div', { class: 'toolrow' });
+  [2, 3, 4, 5].forEach((n) => row.append(h('button', {
+    class: 'tool size' + (n === size ? ' on' : ''), 'aria-pressed': n === size ? 'true' : 'false',
+    onclick: (e) => {
+      size = n;
+      row.querySelectorAll('.size').forEach((x) => { const on = x === e.currentTarget; x.classList.toggle('on', on); x.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+    },
+  }, `${n}人`)));
+  const input = next === 'friend'
+    ? h('input', { class: 'input key', id: 'new-key', inputmode: 'numeric', maxlength: 4, placeholder: '0000', autocomplete: 'off', 'aria-label': 'カギ', value: keep.code || '' }) : null;
+  const msg = h('p', { class: 'note', role: 'status' }, keep.error
+    || (input ? '好きな4けたの数字をカギにしてね。友だちには、この数字を教える' : '同じ人数をえらんだ人と、同じ部屋になります'));
+  const go = () => {
+    let code = null;
+    if (input) {
+      code = input.value.replace(/\D/g, '');
+      if (code.length !== KEY_LENGTH) { sfx('error'); msg.textContent = `カギは${KEY_LENGTH}けたの数字にしてね`; return; }
     }
+    openRoom(next, level, size, code);
+  };
+  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  show('setup-' + next,
+    head(next === 'friend' ? '部屋を作る' : '対戦', input ? '人数とカギを決めよう' : '人数を決めよう'),
+    h('div', { class: 'tools' }, h('p', { class: 'lead' }, '何人で遊ぶ？（この人数で絵を分けます）'), row),
+    input ? h('div', { class: 'ticket' }, h('small', {}, icon('key'), 'カギ（4けた）'), input,
+      h('button', { class: 'tool', onclick: () => { input.value = String(Math.floor(Math.random() * 10000)).padStart(4, '0'); } }, 'おまかせ')) : null,
+    msg,
+    h('button', { class: 'btn primary', id: 'open-room', onclick: go }, input ? '部屋を作る' : '部屋に入る'),
+    backButton(() => levelScreen(next)),
+  );
+}
+
+async function openRoom(next, level, size, code) {
+  G.level = level;
+  G.mode = next;
+  show('loading', h('div', { class: 'loading' }, h('i', {}), h('i', {}), h('i', {})), h('p', { class: 'lead' }, next === 'online' ? '部屋をさがしています…' : '部屋を作っています…'));
+  try {
+    let room = next === 'online' ? await net.api.findRoom(level, size) : null;
+    if (!room) {
+      room = await net.api.createRoom({ code: next === 'friend' ? code : null, mode: next, difficulty: level, size, status: 'waiting', player_count: 1 });
+    }
+    if (!room.size) room.size = size;
     await enterRoom(room);
   } catch (err) {
     console.error(err);
     sfx('error');
-    toast('部屋に入れませんでした：' + (err.message || err));
+    const text = String((err && err.message) || err);
+    if (/key in use/.test(text)) { setupScreen(next, level, { size, code, error: 'そのカギは、いまほかの部屋で使われています。別の数字にしてね' }); return; }
+    toast('部屋に入れませんでした：' + text);
     titleScreen();
   }
 }
@@ -273,7 +313,7 @@ function friendScreen() {
     head('フレンド', '友だちと同じ部屋で遊ぼう'),
     h('nav', { class: 'menu' },
       card('#ffc928', icon('key'), 'カギを入力', '友だちの部屋に入る', keyScreen),
-      card('#3ddc84', icon('door'), '部屋を作る', '難易度を選ぶとカギが出る', () => levelScreen('friend'))),
+      card('#3ddc84', icon('door'), '部屋を作る', '人数とカギを自分で決める', () => levelScreen('friend'))),
     backButton(titleScreen),
   );
 }
@@ -307,6 +347,8 @@ function keyScreen() {
 
 // ---------- 部屋（ロビー） ----------
 const myState = () => ({ id: me.id, pub: me.pub, name: me.name, joinedAt: G.joinedAt, ready: G.ready, phase: G.phase });
+// この部屋の人数（部屋を作った人が決めた数。分からないときは5人）
+const cap = () => Math.min(MAX_PLAYERS, Math.max(2, (G.room && G.room.size) || MAX_PLAYERS));
 const isHost = () => G.players.length > 0 && G.players[0].id === me.id;
 function track() { if (G.chan) G.chan.update(myState()); }
 
@@ -395,16 +437,16 @@ function onPresence(list) {
   const settling = now - G.joinedAt < 3000;
   if (settling) G.orderIds.sort((a, b) => ((G.joinTimes[a] || 0) - (G.joinTimes[b] || 0)) || (a < b ? -1 : 1));
   const myIndex = G.orderIds.indexOf(me.id);
-  if (myIndex >= MAX_PLAYERS && !G.admitted && !settling) {
+  if (myIndex >= cap() && !G.admitted && !settling) {
     leaveRoom();
     toast('この部屋は満員でした');
     titleScreen();
     return;
   }
-  if (!settling && myIndex >= 0 && myIndex < MAX_PLAYERS) G.admitted = true; // 一度すわったら、もう追い出されない
+  if (!settling && myIndex >= 0 && myIndex < cap()) G.admitted = true; // 一度すわったら、もう追い出されない
 
   const before = G.players.length;
-  G.players = G.orderIds.slice(0, MAX_PLAYERS).filter((id) => valid.has(id)).map((id) => valid.get(id));
+  G.players = G.orderIds.slice(0, cap()).filter((id) => valid.has(id)).map((id) => valid.get(id));
   if (G.round && G.round.order) {
     for (const o of G.round.order) {
       if (G.players.some((p) => p.id === o.id)) delete G.seen[o.id];
@@ -422,7 +464,8 @@ function onPresence(list) {
 }
 
 // ---------- ラウンドを始める ----------
-const allReady = () => G.players.length >= 2 && G.players.every((p) => p.ready && p.phase === 'lobby');
+// 決めた人数がそろって、全員が「準備OK」なら始められる
+const allReady = () => G.players.length === cap() && G.players.every((p) => p.ready && p.phase === 'lobby');
 
 // 2人以上いて全員が「準備OK」なら、先頭の人がラウンドを始める。
 // 先頭の人が始めないとき（席の順番が画面によってずれたとき）は、4〜6秒後にほかの人が始める。
@@ -488,6 +531,7 @@ function validStart(d, from) {
   if (new Set(ids).size !== ids.length || !ids.every((id) => G.keys.has(id)) || !ids.includes(from)) return false;
   if (!(TOPICS[G.room.difficulty] || []).includes(d.topic)) return false;
   if (!layoutsFor(d.count).includes(d.layout)) return false;
+  if (G.room.size && d.count !== cap()) return false; // 決めた人数で分ける
   return Number.isInteger(d.seconds) && d.seconds >= 5 && d.seconds <= 600;
 }
 
@@ -542,7 +586,7 @@ function renderLobby() {
 
   const lv = LEVELS[G.room.difficulty] || LEVELS.A;
   const seats = [];
-  for (let i = 0; i < MAX_PLAYERS; i++) {
+  for (let i = 0; i < cap(); i++) {
     const p = G.players[i];
     const state = !p ? 'あいています' : p.phase !== 'lobby' ? 'おえかき中' : p.ready ? '準備OK' : 'まだ';
     seats.push(h('li', { class: 'podium' + (p ? '' : ' empty') + (p && p.ready ? ' ready' : ''), style: `--seat:${SEATS[i].color}` },
@@ -552,17 +596,17 @@ function renderLobby() {
       h('div', { class: 'lamp' }, p && p.ready ? icon('check') : null, state)));
   }
   const info = G.busy ? 'いまゲーム中です。次のラウンドから参加できます'
-    : G.players.length < 2 ? 'ほかの人を待っています（2人以上で始められます）'
+    : G.players.length < cap() ? `あと${cap() - G.players.length}人そろうと始められます（${cap()}人の部屋）`
       : '全員が「準備OK」を押すと始まります';
   const copyKey = async () => {
     try { await navigator.clipboard.writeText(G.room.code); toast('カギをコピーしました'); } catch (e) { toast('カギ：' + G.room.code); }
   };
   show('lobby',
     head(modeLabel() + 'の部屋'),
-    h('p', { class: 'chips' }, h('span', { class: 'chip' }, '難易度：' + lv.label), h('span', { class: 'chip' }, `${G.players.length} / ${MAX_PLAYERS} 人`)),
+    h('p', { class: 'chips' }, h('span', { class: 'chip' }, '難易度：' + lv.label), h('span', { class: 'chip' }, `${G.players.length} / ${cap()} 人`)),
     G.room.code ? h('div', { class: 'ticket' }, h('small', {}, icon('key'), 'カギ（友だちに教えてね）'), h('b', { id: 'room-key' }, formatKey(G.room.code)),
       h('button', { class: 'tool', onclick: copyKey }, icon('copy'), 'コピー')) : null,
-    h('ul', { class: 'podiums' }, seats),
+    h('ul', { class: 'podiums', style: `--n:${cap()};--m:${Math.min(3, cap())}` }, seats),
     h('p', { class: 'note', id: 'lobby-info', role: 'status' }, info),
     h('button', {
       class: 'btn primary' + (G.ready ? ' on' : ''), id: 'ready-btn',

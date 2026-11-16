@@ -1,4 +1,4 @@
--- schema.sql（v5：カギ4けた・5人まで）
+-- schema.sql（v6：カギと人数を、部屋を作る人が決める）
 -- お絵かき合体：Supabase の SQL Editor に全部貼って、Run を1回押す。何回実行してもよい。
 --
 -- しくみ：
@@ -23,6 +23,7 @@ create table if not exists public.rooms (
   updated_at timestamptz not null default now()
 );
 
+alter table public.rooms add column if not exists size int not null default 5;      -- この部屋の人数（2〜5）
 alter table public.rooms add column if not exists host_secret text;   -- 部屋を作った人だけが知る合言葉
 alter table public.rooms alter column host_id drop not null;          -- v1 の列。もう使わない
 
@@ -60,6 +61,8 @@ revoke all on table public.rooms from anon, authenticated;
 
 -- v1 の関数は返す形がちがうので、作り直す
 drop function if exists public.find_room(text);
+drop function if exists public.find_room(text, int);
+drop function if exists public.create_room(text, text);
 drop function if exists public.room_by_code(text);
 
 -- ---------- 窓口の中だけで使う道具 ----------
@@ -82,9 +85,11 @@ end $$;
 revoke all on function public.client_ip() from public, anon, authenticated;
 
 -- ---------- 窓口 ----------
--- 部屋を作る。カギはサーバーが決める。
+-- 部屋を作る。カギ（4けた）と人数（2〜5）は、部屋を作る人が決める。カギを省くと、サーバーが決める。
+-- 同じカギの部屋が、いま使われていたら 'key in use' で断る。
+--   「いま使われている」= 2分以内に更新された部屋。2分より古い同じカギの部屋は、使われていないと見て消す
 -- いたずら対策：同じ接続元から10分に20部屋まで。使われている部屋が全体で500を超えたら断る
-create or replace function public.create_room(p_mode text, p_difficulty text)
+create or replace function public.create_room(p_mode text, p_difficulty text, p_code text default null, p_size int default 5)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_code text;
@@ -93,6 +98,7 @@ declare
   v_tries int := 0;
   v_ip text := client_ip();
   v_limit int := 20;
+  v_size int := least(5, greatest(2, coalesce(p_size, 5)));
 begin
   if p_mode is null or p_difficulty is null
      or p_mode not in ('online', 'friend') or p_difficulty not in ('A', 'B', 'C') then
@@ -107,7 +113,14 @@ begin
   if (select count(*) from rooms where updated_at > now() - interval '10 minutes') >= 500 then
     raise exception 'too many rooms';
   end if;
-  if p_mode = 'friend' then
+  if p_mode = 'friend' and p_code is not null then
+    if p_code !~ '^[0-9]{4}$' then raise exception 'bad key'; end if;
+    if exists (select 1 from rooms r where r.code = p_code and r.updated_at > now() - interval '2 minutes') then
+      raise exception 'key in use';
+    end if;
+    delete from rooms r where r.code = p_code;
+    v_code := p_code;
+  elsif p_mode = 'friend' then
     loop
       -- 4けた（1000〜9999）。予測できない乱数（gen_random_uuid）から作る。いま使われているカギとは重ならない
       v_code := (1000 + (('x' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 15))::bit(60)::bigint % 9000))::text;
@@ -117,20 +130,21 @@ begin
       if v_tries > 60 then raise exception 'no free key'; end if;
     end loop;
   end if;
-  insert into rooms (code, mode, difficulty, status, player_count, host_secret)
-    values (v_code, p_mode, p_difficulty, 'waiting', 1, v_secret)
+  insert into rooms (code, mode, difficulty, status, player_count, host_secret, size)
+    values (v_code, p_mode, p_difficulty, 'waiting', 1, v_secret, v_size)
     returning id into v_id;
   insert into key_attempts (ip, kind) values (v_ip, 'room');
-  return jsonb_build_object('id', v_id, 'code', v_code, 'mode', p_mode, 'difficulty', p_difficulty, 'secret', v_secret);
+  return jsonb_build_object('id', v_id, 'code', v_code, 'mode', p_mode, 'difficulty', p_difficulty, 'size', v_size, 'secret', v_secret);
 end $$;
 
--- 対戦：同じ難易度で待っている部屋を1つ返す（なければ null）。合言葉は返さない
-create or replace function public.find_room(p_difficulty text)
+-- 対戦：同じ難易度・同じ人数で待っている部屋を1つ返す（なければ null）。合言葉は返さない
+create or replace function public.find_room(p_difficulty text, p_size int default null)
 returns jsonb language sql stable security definer set search_path = public as $$
-  select jsonb_build_object('id', r.id, 'code', r.code, 'mode', r.mode, 'difficulty', r.difficulty)
+  select jsonb_build_object('id', r.id, 'code', r.code, 'mode', r.mode, 'difficulty', r.difficulty, 'size', r.size)
   from rooms r
   where r.mode = 'online' and r.difficulty = p_difficulty and r.status = 'waiting'
-    and r.player_count < 5 and r.updated_at > now() - interval '45 seconds'
+    and (p_size is null or r.size = p_size)
+    and r.player_count < r.size and r.updated_at > now() - interval '45 seconds'
   order by r.created_at asc
   limit 1;
 $$;
@@ -154,7 +168,7 @@ begin
   end if;
 
   if p_code is not null and p_code ~ '^[0-9]{4}$' then
-    select jsonb_build_object('id', r.id, 'code', r.code, 'mode', r.mode, 'difficulty', r.difficulty)
+    select jsonb_build_object('id', r.id, 'code', r.code, 'mode', r.mode, 'difficulty', r.difficulty, 'size', r.size)
       into v_room
       from rooms r
       where r.mode = 'friend' and r.code = p_code and r.updated_at > now() - interval '30 minutes'
@@ -187,13 +201,13 @@ begin
 end $$;
 
 -- 窓口を使えるのは、ゲームのページ（anon）とログインした人（authenticated）だけ
-revoke all on function public.create_room(text, text) from public;
-revoke all on function public.find_room(text) from public;
+revoke all on function public.create_room(text, text, text, int) from public;
+revoke all on function public.find_room(text, int) from public;
 revoke all on function public.room_by_code(text) from public;
 revoke all on function public.touch_room(uuid, text, int, text) from public;
 revoke all on function public.close_room(uuid, text) from public;
-grant execute on function public.create_room(text, text) to anon, authenticated;
-grant execute on function public.find_room(text) to anon, authenticated;
+grant execute on function public.create_room(text, text, text, int) to anon, authenticated;
+grant execute on function public.find_room(text, int) to anon, authenticated;
 grant execute on function public.room_by_code(text) to anon, authenticated;
 grant execute on function public.touch_room(uuid, text, int, text) to anon, authenticated;
 grant execute on function public.close_room(uuid, text) to anon, authenticated;

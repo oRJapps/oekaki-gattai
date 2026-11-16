@@ -4,7 +4,7 @@
 //   local : お試しモード（localStorage + BroadcastChannel。同じブラウザの別タブ同士だけ）
 //
 // 共通の関数：
-//   findRoom(level)            対戦用：同じ難易度で待っている部屋を1つ返す（なければ null）
+//   findRoom(level, size)      対戦用：同じ難易度・同じ人数で待っている部屋を1つ返す（なければ null）
 //   roomByCode(code)           フレンド用：カギから部屋を探す（なければ null）
 //   createRoom(room)           部屋を作る
 //   updateRoom(room, patch)    人数や状態を更新する（部屋を作った人だけができる）
@@ -12,7 +12,7 @@
 //   join(roomId, state, on)    部屋に入る。on.presence(一覧) と on.event(種類, 中身) が呼ばれる
 //                              戻り値：{ send(種類, 中身), update(自分の状態), leave() }
 
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261116160722';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261116161304';
 
 // ?trial=1 をつけて開くと、Supabase を使わずにお試しモードで動く（動作の確認用）
 const forceTrial = new URLSearchParams(location.search).has('trial');
@@ -29,7 +29,7 @@ async function client() {
     if (!window.supabase) {
       await new Promise((resolve, reject) => {
         const tag = document.createElement('script');
-        tag.src = 'vendor/supabase.js?v=20261116160722';
+        tag.src = 'vendor/supabase.js?v=20261116161304';
         tag.onload = resolve;
         tag.onerror = () => reject(new Error('通信の部品を読みこめませんでした'));
         document.head.append(tag);
@@ -47,12 +47,22 @@ async function rpc(name, args) {
   return data;
 }
 
+const missing = (err) => !!err && (err.code === 'PGRST202' || /Could not find the function/i.test(err.message || ''));
+
 const supa = {
-  async findRoom(level) { return (await rpc('find_room', { p_difficulty: level })) || null; },
+  // Supabase の設定が古い（v5 まで）と、新しい形の窓口がまだない。そのときは古い形で呼ぶ
+  async findRoom(level, size) {
+    try { return (await rpc('find_room', { p_difficulty: level, p_size: size })) || null; }
+    catch (err) { if (!missing(err)) throw err; return (await rpc('find_room', { p_difficulty: level })) || null; }
+  },
   // まちがいが続くと { error: 'locked' } が返る（総当たり対策）
   async roomByCode(code) { return (await rpc('room_by_code', { p_code: code })) || null; },
   // カギはサーバーが決める。返ってくる secret（合言葉）は、部屋を作った人だけが持つ
-  async createRoom(room) { return rpc('create_room', { p_mode: room.mode, p_difficulty: room.difficulty }); },
+  // カギ（code）と人数（size）は、部屋を作る人が決める。カギが使われていたら 'key in use' のエラーになる
+  async createRoom(room) {
+    try { return await rpc('create_room', { p_mode: room.mode, p_difficulty: room.difficulty, p_code: room.code || null, p_size: room.size || 5 }); }
+    catch (err) { if (!missing(err)) throw err; return rpc('create_room', { p_mode: room.mode, p_difficulty: room.difficulty }); }
+  },
   // 合言葉を持っている人（部屋を作った人）だけが更新できる。持っていなければ何もしない
   async updateRoom(room, patch) {
     if (!room || !room.secret) return;
@@ -105,10 +115,10 @@ function saveRooms(rooms) {
 }
 
 const local = {
-  async findRoom(level) {
+  async findRoom(level, size) {
     const now = Date.now();
-    const list = Object.values(loadRooms()).filter((r) => r.mode === 'online' && r.difficulty === level
-      && r.status === 'waiting' && r.player_count < 5 && now - r.updated < 45000);
+    const list = Object.values(loadRooms()).filter((r) => r.mode === 'online' && r.difficulty === level && (r.size || 5) === size
+      && r.status === 'waiting' && r.player_count < (r.size || 5) && now - r.updated < 45000);
     list.sort((a, b) => a.created - b.created);
     return list[0] || null;
   },
@@ -122,6 +132,12 @@ const local = {
     const rooms = loadRooms();
     const now = Date.now();
     for (const id of Object.keys(rooms)) if (now - rooms[id].updated > 3600000) delete rooms[id];
+    // 同じカギの部屋が、いま使われていたら作れない（2分より古い部屋は、使われていないと見て消す）
+    for (const id of Object.keys(rooms)) {
+      if (!room.code || rooms[id].code !== room.code) continue;
+      if (now - rooms[id].updated < 120000) throw new Error('key in use');
+      delete rooms[id];
+    }
     const row = { ...room, id: crypto.randomUUID(), created: now, updated: now };
     rooms[row.id] = row;
     saveRooms(rooms);
