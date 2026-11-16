@@ -1,133 +1,100 @@
 // draw.js
-// 線を描くキャンバス、分け方（レイアウト）、合体のアニメーション。
-// 座標はすべて 1000×1000。線の形式：{ c: 色, w: 太さ, e: 消しゴムなら1, p: [x0, y0, x1, y1, ...] }
-// パートの範囲（region）：{ path: Path2D, label: 名前, cx, cy: 名前を書く位置 }
+// 絵を描く部分ぜんぶ：分け方（レイアウト）、描くキャンバス、ぬりつぶし、合体（自動でつなげる）、点数。
+//
+// 座標：1人ぶんのパネルは 1000×500（上下に分けるとき）か 500×1000（左右に分けるとき）。
+//       ななめに分けるとき（2人だけ）は 1000×1000 を三角2つに分ける。
+//       全体の絵は、パネルをならべた大きさになる（5人で上下なら 1000×2500 の、たてに長い絵）。
+// 描いたもの（op）：線 { c: 色, w: 太さ, e: 消しゴムなら1, p: [x0, y0, x1, y1, ...] }
+//                  ぬりつぶし { f: 1, c: 色, x, y }
+// レイアウト：{ id, count, w, h, regions: [{ path, label, bbox, cx, cy }], frame, cuts, edgeLen }
+//   frame：つなぎめに沿った向き（u）と、つなぎめをまたぐ向き（v）の座標。合体と点数はこの座標で計算する
 
-export const SIZE = 1000;
-const MAX_POINTS = 6000; // 1パートで送る点の上限（通信量をおさえる）
-
-// ---------- 分け方 ----------
-// 難易度ごとの分け方。初級はまっすぐ、中級はななめやマス目、上級はギザギザや放射状。
-// レイアウトの名前（id）はホストが選んで全員に送る。同じ id と人数なら、だれの画面でも同じ形になる。
-const POOLS = {
-  A: { 2: ['rows', 'cols'], 3: ['rows', 'cols'], 4: ['rows', 'cols'] },
-  B: { 2: ['diag', 'diagR'], 3: ['tee', 'ell', 'diag'], 4: ['grid', 'diag', 'diagR'] },
-  C: { 2: ['zigRows', 'zigCols', 'ring'], 3: ['wye', 'zigRows', 'zigCols'], 4: ['cross', 'zigRows', 'zigCols'] },
-};
+const PANEL = 500;           // パネルの短いほうの辺
+const MAX_POINTS = 6000;     // 1パートで送る点の上限（通信量をおさえる）
+const R2 = Math.SQRT1_2;
 
 export const LAYOUT_NAMES = {
-  rows: '横に分ける（上から順）', cols: '縦に分ける（左から順）',
+  rows: '上から順に分ける', cols: '左から順に分ける',
   diag: 'ななめに分ける', diagR: 'ななめに分ける（逆向き）',
-  tee: '上と、下の左右', ell: '左と、右の上下', grid: '田の字',
-  zigRows: 'ギザギザの横', zigCols: 'ギザギザの縦', ring: 'まんなかと外側',
-  wye: 'Y字に3つ', cross: '×字に4つ',
 };
 
-export function pickLayout(level, count) {
-  const pool = (POOLS[level] || POOLS.A)[Math.min(4, Math.max(2, count))];
+// 人数で使える分け方。2人：上下・左右・ななめ。3〜5人：上下か左右にならべる
+export function layoutsFor(count) {
+  return count === 2 ? ['rows', 'cols', 'diag', 'diagR'] : ['rows', 'cols'];
+}
+
+// 分け方をえらぶ。wide = 横に長いお題（3人以上のときは、横長のお題は左右に、それ以外は上下にならべる）
+export function pickLayout(level, count, wide) {
+  if (count !== 2) return wide ? 'cols' : 'rows';
+  const pool = level === 'A' ? ['rows', 'cols'] : level === 'B' ? ['rows', 'cols', 'diag', 'diagR'] : ['diag', 'diagR', 'diag', 'diagR', 'rows', 'cols'];
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
 const orderLabels = (n, first, last, unit) => {
+  if (n === 1) return ['全部'];
   if (n === 2) return [first, last];
   if (n === 3) return [first, 'まんなか', last];
   return Array.from({ length: n }, (_, i) => `${unit}${i + 1}番目`);
 };
 
-function polyRegion(points, label) {
+function region(points, label) {
   const path = new Path2D();
   points.forEach(([x, y], i) => (i ? path.lineTo(x, y) : path.moveTo(x, y)));
   path.closePath();
-  // 名前を書く位置：面積で見た重心（頂点の平均だと、ギザギザの側に寄ってしまう）
-  let area = 0, cx = 0, cy = 0;
+  const xs = points.map((p) => p[0]), ys = points.map((p) => p[1]);
+  const bbox = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+  let area = 0, cx = 0, cy = 0; // 面積で見た重心（名前を書く位置）
   for (let i = 0; i < points.length; i++) {
     const [x1, y1] = points[i], [x2, y2] = points[(i + 1) % points.length];
     const k = x1 * y2 - x2 * y1;
-    area += k;
-    cx += (x1 + x2) * k;
-    cy += (y1 + y2) * k;
+    area += k; cx += (x1 + x2) * k; cy += (y1 + y2) * k;
   }
-  return { path, label, cx: cx / (3 * area), cy: cy / (3 * area) };
-}
-
-// 多角形を、a*x + b*y <= c の側だけ残して切る
-function cutPoly(points, a, b, c) {
-  const out = [];
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i], q = points[(i + 1) % points.length];
-    const dp = a * p[0] + b * p[1] - c, dq = a * q[0] + b * q[1] - c;
-    if (dp <= 0) out.push(p);
-    if ((dp < 0 && dq > 0) || (dp > 0 && dq < 0)) {
-      const t = dp / (dp - dq);
-      out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
-    }
-  }
-  return out;
-}
-
-const SQUARE = [[0, 0], [SIZE, 0], [SIZE, SIZE], [0, SIZE]];
-const flipX = (points) => points.map(([x, y]) => [SIZE - x, y]).reverse();
-const swapXY = (points) => points.map(([x, y]) => [y, x]).reverse();
-
-// ななめの帯。どのパートも同じ広さになるように境目を決める
-function diagBands(n) {
-  const cut = (f) => (f <= 0.5 ? Math.sqrt(2 * f) * SIZE : 2 * SIZE - Math.sqrt(2 * (1 - f)) * SIZE);
-  const bands = [];
-  for (let i = 0; i < n; i++) {
-    let poly = SQUARE;
-    if (i > 0) poly = cutPoly(poly, -1, -1, -cut(i / n));
-    if (i < n - 1) poly = cutPoly(poly, 1, 1, cut((i + 1) / n));
-    bands.push(poly);
-  }
-  return bands;
-}
-
-// 横の帯。zig が true なら境目をギザギザにする
-function rowBands(n, zig) {
-  const edge = (i) => {
-    const base = SIZE * i / n;
-    if (!zig || i === 0 || i === n) return [[0, base], [SIZE, base]];
-    const pts = [];
-    for (let k = 0; k <= 10; k++) pts.push([k * 100, base + (k % 2 ? 45 : -45)]);
-    return pts;
-  };
-  const bands = [];
-  for (let i = 0; i < n; i++) bands.push([...edge(i), ...edge(i + 1).slice().reverse()]);
-  return bands;
+  // rect：範囲が四角ぴったりなら true（area は面積の2倍）
+  return { path, label, bbox, cx: cx / (3 * area), cy: cy / (3 * area), rect: points.length === 4 && bbox.w * bbox.h === Math.abs(area) / 2 };
 }
 
 export function makeLayout(id, count) {
-  const n = Math.min(4, Math.max(1, count));
-  const named = (polys, labels) => polys.map((p, i) => polyRegion(p, labels[i]));
-  if (n === 1) return named([SQUARE], ['全部']);
-  const rowL = orderLabels(n, '上', '下', '上から'), colL = orderLabels(n, '左', '右', '左から');
-  const C = [500, 500];
-  switch (id) {
-    case 'cols': return named(rowBands(n, false).map(swapXY), colL);
-    case 'zigRows': return named(rowBands(n, true), rowL);
-    case 'zigCols': return named(rowBands(n, true).map(swapXY), colL);
-    case 'diag': return named(diagBands(n), orderLabels(n, '左上', '右下', '左上から'));
-    case 'diagR': return named(diagBands(n).map(flipX), orderLabels(n, '右上', '左下', '右上から'));
-    case 'tee': if (n === 3) return named([[[0, 0], [1000, 0], [1000, 400], [0, 400]], [[0, 400], [500, 400], [500, 1000], [0, 1000]], [[500, 400], [1000, 400], [1000, 1000], [500, 1000]]], ['上', '左下', '右下']); break;
-    case 'ell': if (n === 3) return named([[[0, 0], [400, 0], [400, 1000], [0, 1000]], [[400, 0], [1000, 0], [1000, 500], [400, 500]], [[400, 500], [1000, 500], [1000, 1000], [400, 1000]]], ['左', '右上', '右下']); break;
-    case 'grid': if (n === 4) return named([[[0, 0], [500, 0], [500, 500], [0, 500]], [[500, 0], [1000, 0], [1000, 500], [500, 500]], [[0, 500], [500, 500], [500, 1000], [0, 1000]], [[500, 500], [1000, 500], [1000, 1000], [500, 1000]]], ['左上', '右上', '左下', '右下']); break;
-    case 'wye': if (n === 3) return named([[[0, 0], [1000, 0], [1000, 250], C, [0, 250]], [[0, 250], C, [500, 1000], [0, 1000]], [[1000, 250], [1000, 1000], [500, 1000], C]], ['上', '左下', '右下']); break;
-    case 'cross': if (n === 4) return named([[[0, 0], [1000, 0], C], [[1000, 0], [1000, 1000], C], [[1000, 1000], [0, 1000], C], [[0, 1000], [0, 0], C]], ['上', '右', '下', '左']); break;
-    case 'ring': if (n === 2) {
-      const inner = new Path2D();
-      inner.arc(500, 500, 400, 0, Math.PI * 2);
-      const outer = new Path2D();
-      outer.rect(0, 0, SIZE, SIZE);
-      outer.moveTo(900, 500); // 四角から円へ余計な線が引かれないようにする
-      outer.arc(500, 500, 400, 0, Math.PI * 2);
-      return [{ path: inner, label: 'まんなか', cx: 500, cy: 500 }, { path: outer, label: '外側', cx: 500, cy: 50 }];
-    } break;
-    default: break;
+  const n = Math.min(5, Math.max(1, count | 0));
+  const use = n >= 2 && layoutsFor(n).includes(id) ? id : 'rows';
+  if (use === 'cols') {
+    return {
+      id: use, count: n, w: PANEL * n, h: 1000,
+      regions: orderLabels(n, '左', '右', '左から').map((label, i) => region([[PANEL * i, 0], [PANEL * (i + 1), 0], [PANEL * (i + 1), 1000], [PANEL * i, 1000]], label)),
+      frame: { ox: 0, oy: 0, tx: 0, ty: 1, nx: 1, ny: 0 }, cuts: Array.from({ length: n - 1 }, (_, i) => PANEL * (i + 1)), edgeLen: 1000, depth: PANEL,
+    };
   }
-  return named(rowBands(n, false), rowL); // rows、または人数に合わない id のとき
+  if (use === 'diag') { // 右上の角から左下の角へ切る。左上の三角と、右下の三角
+    return {
+      id: use, count: 2, w: 1000, h: 1000,
+      regions: [region([[0, 0], [1000, 0], [0, 1000]], '左上'), region([[1000, 0], [1000, 1000], [0, 1000]], '右下')],
+      frame: { ox: 1000, oy: 0, tx: -R2, ty: R2, nx: R2, ny: R2 }, cuts: [0], edgeLen: 1000 * Math.SQRT2, depth: 1000 * R2,
+    };
+  }
+  if (use === 'diagR') { // 左上の角から右下の角へ切る。右上の三角と、左下の三角
+    return {
+      id: use, count: 2, w: 1000, h: 1000,
+      regions: [region([[0, 0], [1000, 0], [1000, 1000]], '右上'), region([[0, 0], [1000, 1000], [0, 1000]], '左下')],
+      frame: { ox: 0, oy: 0, tx: R2, ty: R2, nx: -R2, ny: R2 }, cuts: [0], edgeLen: 1000 * Math.SQRT2, depth: 1000 * R2,
+    };
+  }
+  return {
+    id: 'rows', count: n, w: 1000, h: PANEL * n,
+    regions: orderLabels(n, '上', '下', '上から').map((label, i) => region([[0, PANEL * i], [1000, PANEL * i], [1000, PANEL * (i + 1)], [0, PANEL * (i + 1)]], label)),
+    frame: { ox: 0, oy: 0, tx: 1, ty: 0, nx: 0, ny: 1 }, cuts: Array.from({ length: n - 1 }, (_, i) => PANEL * (i + 1)), edgeLen: 1000, depth: PANEL,
+  };
 }
 
-// ---------- 線を描く ----------
+// つなぎめに沿った座標（u, v）から、絵の座標（x, y）へ
+const toWorld = (f, u, v) => [f.ox + f.tx * u + f.nx * v, f.oy + f.ty * u + f.ny * v];
+
+function newCanvas(w, h) {
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(w);
+  cv.height = Math.round(h);
+  return cv;
+}
+
+// ---------- 線とぬりつぶし ----------
 function applyStyle(ctx, s) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -136,18 +103,12 @@ function applyStyle(ctx, s) {
   ctx.globalCompositeOperation = s.e ? 'destination-out' : 'source-over';
 }
 
-// 線のうち、i 番目の点までの1区間だけを描く
-export function drawSegment(ctx, s, i) {
+function drawSegment(ctx, s, i) {
   const p = s.p;
   applyStyle(ctx, s);
   ctx.beginPath();
-  if (i === 0) {
-    ctx.moveTo(p[0], p[1]);
-    ctx.lineTo(p[0] + 0.01, p[1]);
-  } else {
-    ctx.moveTo(p[2 * i - 2], p[2 * i - 1]);
-    ctx.lineTo(p[2 * i], p[2 * i + 1]);
-  }
+  if (i === 0) { ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0] + 0.01, p[1]); }
+  else { ctx.moveTo(p[2 * i - 2], p[2 * i - 1]); ctx.lineTo(p[2 * i], p[2 * i + 1]); }
   ctx.stroke();
 }
 
@@ -161,27 +122,102 @@ export function drawStroke(ctx, s) {
   ctx.stroke();
 }
 
-// パートの範囲の中だけに描く
-export function withClip(ctx, region, fn) {
-  ctx.save();
-  ctx.clip(region.path, 'evenodd');
-  fn();
-  ctx.restore();
+// 1人ぶんの絵をのせる透明な紙（レイヤー）。大きさはそのパートの範囲ぴったり
+class Layer {
+  constructor(reg) {
+    this.reg = reg;
+    this.cv = newCanvas(reg.bbox.w, reg.bbox.h);
+    this.ctx = this.cv.getContext('2d', { willReadFrequently: true });
+    this.mask = null; // ぬりつぶしで「範囲の中かどうか」を見る表（三角の範囲のときだけ使う）
+  }
+
+  // 絵の座標で描けるようにして、範囲の外にはみ出さないようにする
+  inside(fn) {
+    const c = this.ctx, b = this.reg.bbox;
+    c.save();
+    c.setTransform(1, 0, 0, 1, -b.x, -b.y);
+    c.clip(this.reg.path);
+    fn(c);
+    c.restore();
+  }
+
+  clear() { this.ctx.setTransform(1, 0, 0, 1, 0, 0); this.ctx.clearRect(0, 0, this.cv.width, this.cv.height); }
+
+  segment(s, i) { this.inside((c) => drawSegment(c, s, i)); }
+
+  apply(op) {
+    if (op.f) this.fill(op.x, op.y, op.c);
+    else this.inside((c) => drawStroke(c, op));
+  }
+
+  getMask() {
+    if (this.mask || this.reg.rect) return this.mask;
+    const cv = newCanvas(this.cv.width, this.cv.height), c = cv.getContext('2d');
+    c.setTransform(1, 0, 0, 1, -this.reg.bbox.x, -this.reg.bbox.y);
+    c.fill(this.reg.path);
+    const d = c.getImageData(0, 0, cv.width, cv.height).data;
+    this.mask = new Uint8Array(cv.width * cv.height);
+    for (let i = 0; i < this.mask.length; i++) this.mask[i] = d[i * 4 + 3] > 127 ? 1 : 0;
+    return this.mask;
+  }
+
+  // ぬりつぶし：おした場所から、同じ色がつづいているところを全部その色にする（線でかこまれた中だけ）
+  fill(x, y, hex) {
+    const w = this.cv.width, h = this.cv.height, mask = this.getMask();
+    const px = Math.floor(x - this.reg.bbox.x), py = Math.floor(y - this.reg.bbox.y);
+    if (px < 0 || py < 0 || px >= w || py >= h || (mask && !mask[py * w + px])) return;
+    const img = this.ctx.getImageData(0, 0, w, h), d = img.data;
+    const fr = parseInt(hex.slice(1, 3), 16), fg = parseInt(hex.slice(3, 5), 16), fb = parseInt(hex.slice(5, 7), 16);
+    const s = (py * w + px) * 4, sr = d[s], sg = d[s + 1], sb = d[s + 2], sa = d[s + 3];
+    if (sa > 200 && Math.abs(sr - fr) + Math.abs(sg - fg) + Math.abs(sb - fb) < 12) return; // もうその色
+    const blank = sa < 60;
+    const same = (i) => {
+      const a = d[i * 4 + 3];
+      if (blank) return a < 110; // 何も描いていないところ（線のふちの、うすい部分までふくめる）
+      return a > 140 && Math.abs(d[i * 4] - sr) + Math.abs(d[i * 4 + 1] - sg) + Math.abs(d[i * 4 + 2] - sb) < 96;
+    };
+    const filled = new Uint8Array(w * h);
+    const stack = [py * w + px];
+    while (stack.length) {
+      let i = stack.pop();
+      if (filled[i] || !same(i) || (mask && !mask[i])) continue;
+      const row = Math.floor(i / w) * w;
+      let left = i, right = i;
+      while (left > row && !filled[left - 1] && same(left - 1) && (!mask || mask[left - 1])) left--;
+      while (right < row + w - 1 && !filled[right + 1] && same(right + 1) && (!mask || mask[right + 1])) right++;
+      for (i = left; i <= right; i++) {
+        filled[i] = 1;
+        if (i >= w && !filled[i - w]) stack.push(i - w);
+        if (i < w * (h - 1) && !filled[i + w]) stack.push(i + w);
+      }
+    }
+    // ぬる。線のふち（となりの2マス）は、線の下にも色を入れて、白いすきまが出ないようにする
+    for (let i = 0; i < filled.length; i++) {
+      if (filled[i]) { d[i * 4] = fr; d[i * 4 + 1] = fg; d[i * 4 + 2] = fb; d[i * 4 + 3] = 255; continue; }
+      if (mask && !mask[i]) continue;
+      const xx = i % w;
+      const near = (xx > 0 && filled[i - 1]) || (xx < w - 1 && filled[i + 1]) || (i >= w && filled[i - w]) || (i < w * (h - 1) && filled[i + w])
+        || (xx > 1 && filled[i - 2]) || (xx < w - 2 && filled[i + 2]) || (i >= 2 * w && filled[i - 2 * w]) || (i < w * (h - 2) && filled[i + 2 * w]);
+      if (!near) continue;
+      const a = d[i * 4 + 3] / 255;
+      d[i * 4] = Math.round(d[i * 4] * a + fr * (1 - a));
+      d[i * 4 + 1] = Math.round(d[i * 4 + 1] * a + fg * (1 - a));
+      d[i * 4 + 2] = Math.round(d[i * 4 + 2] * a + fb * (1 - a));
+      d[i * 4 + 3] = 255;
+    }
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.ctx.putImageData(img, 0, 0);
+  }
 }
 
-function newLayer() {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = SIZE;
-  return cv;
-}
-
-// 点が多すぎるときは、間の点を間引く
-function limitPoints(strokes) {
-  let out = strokes.map((s) => ({ c: s.c, w: s.w, e: s.e ? 1 : 0, p: s.p.slice() }));
-  const total = () => out.reduce((n, s) => n + s.p.length / 2, 0);
+// 点が多すぎるときは、線の間の点を間引く（ぬりつぶしはそのまま）
+function limitPoints(ops) {
+  let out = ops.map((s) => (s.f ? { f: 1, c: s.c, x: Math.round(s.x), y: Math.round(s.y) } : { c: s.c, w: s.w, e: s.e ? 1 : 0, p: s.p.slice() }));
+  const total = () => out.reduce((n, s) => n + (s.f ? 0 : s.p.length / 2), 0);
   let guard = 0;
   while (total() > MAX_POINTS && guard++ < 6) {
     out = out.map((s) => {
+      if (s.f) return s;
       const n = s.p.length / 2;
       if (n <= 3) return s;
       const p = [s.p[0], s.p[1]];
@@ -193,21 +229,25 @@ function limitPoints(strokes) {
   return out;
 }
 
-// 自分のパートだけ描けるキャンバス
+// ---------- 描くキャンバス（自分のパートだけが大きく出る） ----------
 export class Pad {
-  constructor(canvas, part, regions) {
+  // notes：つなぎめに出すひとこと { prev: '…', next: '…' }（前の人との境目／次の人との境目）
+  constructor(canvas, layout, part, notes = {}) {
     this.cv = canvas;
-    canvas.width = canvas.height = SIZE;
-    this.ctx = canvas.getContext('2d');
-    this.layer = newLayer();
-    this.lctx = this.layer.getContext('2d');
+    this.layout = layout;
     this.part = part;
-    this.regions = regions;
-    this.region = regions[part];
-    this.strokes = [];
+    this.reg = layout.regions[part];
+    this.notes = notes;
+    const b = this.reg.bbox;
+    canvas.width = b.w;
+    canvas.height = b.h;
+    canvas.style.setProperty('--ratio', String(b.w / b.h));
+    this.ctx = canvas.getContext('2d');
+    this.layer = new Layer(this.reg);
+    this.ops = [];
     this.color = '#1e1e1e';
     this.width = 12;
-    this.erase = false;
+    this.tool = 'pen'; // pen / eraser / fill
     this.enabled = true;
     this.cur = null;
     canvas.addEventListener('pointerdown', (e) => this.down(e));
@@ -218,19 +258,28 @@ export class Pad {
   }
 
   pos(e) {
-    const b = this.cv.getBoundingClientRect();
-    return [Math.round((e.clientX - b.left) / b.width * SIZE), Math.round((e.clientY - b.top) / b.height * SIZE)];
+    const r = this.cv.getBoundingClientRect(), b = this.reg.bbox;
+    return [Math.round(b.x + (e.clientX - r.left) / r.width * b.w), Math.round(b.y + (e.clientY - r.top) / r.height * b.h)];
   }
 
   down(e) {
     if (!this.enabled) return;
     const [x, y] = this.pos(e);
-    if (!this.lctx.isPointInPath(this.region.path, x, y, 'evenodd')) return;
+    if (!this.ctx.isPointInPath(this.reg.path, x, y)) return;
     e.preventDefault();
+    if (this.tool === 'fill') {
+      const op = { f: 1, c: this.color, x, y };
+      this.ops.push(op);
+      this.layer.apply(op);
+      this.compose();
+      return;
+    }
     try { this.cv.setPointerCapture(e.pointerId); } catch (err) { /* 古いブラウザ */ }
-    this.cur = { c: this.color, w: this.erase ? this.width * 3 : this.width, e: this.erase ? 1 : 0, p: [x, y] };
-    this.strokes.push(this.cur);
-    this.seg(0);
+    const erase = this.tool === 'eraser';
+    this.cur = { c: this.color, w: erase ? this.width * 3 : this.width, e: erase ? 1 : 0, p: [x, y] };
+    this.ops.push(this.cur);
+    this.layer.segment(this.cur, 0);
+    this.compose();
   }
 
   move(e) {
@@ -239,120 +288,311 @@ export class Pad {
     const p = this.cur.p;
     if (Math.hypot(x - p[p.length - 2], y - p[p.length - 1]) < 4) return;
     p.push(x, y);
-    this.seg(p.length / 2 - 1);
-  }
-
-  seg(i) {
-    withClip(this.lctx, this.region, () => drawSegment(this.lctx, this.cur, i));
+    this.layer.segment(this.cur, p.length / 2 - 1);
     this.compose();
   }
 
   rebuild() {
-    this.lctx.clearRect(0, 0, SIZE, SIZE);
-    withClip(this.lctx, this.region, () => this.strokes.forEach((s) => drawStroke(this.lctx, s)));
+    this.layer.clear();
+    this.ops.forEach((op) => this.layer.apply(op));
     this.compose();
   }
 
-  undo() { this.cur = null; this.strokes.pop(); this.rebuild(); }
-  clear() { this.cur = null; this.strokes = []; this.rebuild(); }
+  undo() { this.cur = null; this.ops.pop(); this.rebuild(); }
+  clear() { this.cur = null; this.ops = []; this.rebuild(); }
 
   compose() {
-    const c = this.ctx;
+    const c = this.ctx, b = this.reg.bbox, L = this.layout, f = L.frame;
+    c.setTransform(1, 0, 0, 1, 0, 0);
     c.globalCompositeOperation = 'source-over';
     c.fillStyle = '#fff';
-    c.fillRect(0, 0, SIZE, SIZE);
-    c.drawImage(this.layer, 0, 0);
-    // ほかの人のパートは暗くして見えなくする
-    c.font = 'bold 52px sans-serif';
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    this.regions.forEach((r, i) => {
+    c.fillRect(0, 0, b.w, b.h);
+    c.drawImage(this.layer.cv, 0, 0);
+    c.setTransform(1, 0, 0, 1, -b.x, -b.y); // ここからは絵の座標で描く
+    // ほかの人のパートが同じ四角の中にあるとき（ななめ）は、暗くして見えなくする
+    L.regions.forEach((r, i) => {
       if (i === this.part) return;
+      const o = r.bbox;
+      if (o.x >= b.x + b.w || o.x + o.w <= b.x || o.y >= b.y + b.h || o.y + o.h <= b.y) return;
       c.fillStyle = '#2b3252';
-      c.fill(r.path, 'evenodd');
+      c.fill(r.path);
       c.fillStyle = 'rgba(255,255,255,.35)';
+      c.font = 'bold 52px sans-serif';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
       c.fillText('ひみつ', r.cx, r.cy);
     });
-    c.strokeStyle = '#ffc928';
+    // つなぎめ（となりの人の絵とくっつく線）を、金色の点線で見せる
     c.lineWidth = 10;
-    c.lineJoin = 'round';
-    c.stroke(this.region.path);
+    c.strokeStyle = '#ffb300';
+    c.setLineDash([26, 18]);
+    c.font = 'bold 30px sans-serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    [[this.part - 1, 1, this.notes.prev], [this.part, -1, this.notes.next]].forEach(([k, side, note]) => {
+      if (k < 0 || k >= L.cuts.length) return;
+      const [x1, y1] = toWorld(f, 0, L.cuts[k]), [x2, y2] = toWorld(f, L.edgeLen, L.cuts[k]);
+      c.beginPath();
+      c.moveTo(x1, y1);
+      c.lineTo(x2, y2);
+      c.stroke();
+      if (!note || (L.id !== 'rows' && L.id !== 'cols')) return; // ななめのときは、ひとことを出さない
+      const [tx, ty] = toWorld(f, L.edgeLen / 2, L.cuts[k] + side * 36);
+      c.save();
+      c.translate(tx, ty);
+      if (L.id === 'cols') c.rotate(-Math.PI / 2); // 左右に分けるときは、つなぎめに沿ってたて向きに書く
+      c.fillStyle = 'rgba(170,110,0,.85)';
+      c.fillText(note, 0, 0);
+      c.restore();
+    });
+    c.setLineDash([]);
+    c.setTransform(1, 0, 0, 1, 0, 0);
   }
 
-  getStrokes() { return limitPoints(this.strokes); }
+  getOps() { return limitPoints(this.ops); }
 }
 
-// 分け方の見本（お題の画面で見せる小さな図）。自分のパートを金色にする
-export function drawLayoutPreview(canvas, regions, myPart) {
-  canvas.width = canvas.height = SIZE;
+// 分け方の見本（お題の画面などで見せる小さな図）。自分のパートを金色にする
+export function drawLayoutPreview(canvas, layout, myPart) {
+  canvas.width = layout.w;
+  canvas.height = layout.h;
+  canvas.style.setProperty('--ratio', String(layout.w / layout.h));
   const ctx = canvas.getContext('2d');
-  regions.forEach((r, i) => {
+  layout.regions.forEach((r, i) => {
     ctx.fillStyle = i === myPart ? '#ffc928' : '#2b3252';
-    ctx.fill(r.path, 'evenodd');
+    ctx.fill(r.path);
   });
   ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 14;
+  ctx.lineWidth = Math.max(layout.w, layout.h) / 70;
   ctx.lineJoin = 'round';
-  regions.forEach((r) => ctx.stroke(r.path));
+  layout.regions.forEach((r) => ctx.stroke(r.path));
 }
 
-// 合体：パートごとの線を、少しずつ描いて1枚にする
-export function animateReveal(canvas, parts, regions, onDone) {
-  canvas.width = canvas.height = SIZE;
-  const ctx = canvas.getContext('2d');
-  const layers = parts.map(() => newLayer());
-  const lctx = layers.map((l) => l.getContext('2d'));
-  const tasks = [];
-  parts.forEach((strokes, pi) => (strokes || []).forEach((s) => {
-    for (let i = 0; i < s.p.length / 2; i++) tasks.push([pi, s, i]);
-  }));
-  const perFrame = Math.max(3, Math.ceil(tasks.length / 240)); // 全体で約4秒
-  let k = 0, timer = null, stopped = false;
+// 小さな見本の絵（おてほん）を描く。ops は 1000×1000 の座標
+export function drawSample(canvas, ops, size = 300) {
+  canvas.width = canvas.height = size;
+  const c = canvas.getContext('2d');
+  c.fillStyle = '#fff';
+  c.fillRect(0, 0, size, size);
+  c.scale(size / 1000, size / 1000);
+  ops.forEach((s) => drawStroke(c, s));
+}
 
-  function compose(dividers) {
+// ---------- つなぎめを調べる ----------
+const DEPTHS = [3, 8, 14, 20, 27, 34]; // つなぎめから何ドット内側までを「つなぎめにとどいている」と見るか
+
+// つなぎめに沿って、絵がある場所の集まり（run）をさがす。side = -1：つなぎめの手前の人、+1：向こうの人
+function profile(layout, data, i, cut, side) {
+  const f = layout.frame, b = layout.regions[i].bbox, img = data[i];
+  const runs = [];
+  let start = -1, last = -100;
+  for (let u = 0; u <= layout.edgeLen; u += 2) {
+    let ink = false;
+    for (const depth of DEPTHS) {
+      const [x, y] = toWorld(f, u, cut + side * depth);
+      const px = Math.round(x - b.x), py = Math.round(y - b.y);
+      if (px < 0 || py < 0 || px >= img.width || py >= img.height) continue;
+      if (img.data[(py * img.width + px) * 4 + 3] > 60) { ink = true; break; }
+    }
+    if (!ink) continue;
+    if (u - last > 14) { if (start >= 0) runs.push([start, last]); start = u; }
+    last = u;
+  }
+  if (start >= 0) runs.push([start, last]);
+  if (!runs.length) return { n: 0, len: 0, a: 0, b: 0, c: layout.edgeLen / 2 };
+  const a = runs[0][0], z = runs[runs.length - 1][1];
+  return { n: runs.length, len: Math.max(2, z - a), a, b: z, c: (a + z) / 2 };
+}
+
+// そのパートの絵が、つなぎめからどこまで広がっているか
+function extent(layout, img, i, cut) {
+  const f = layout.frame, b = layout.regions[i].bbox;
+  let uMin = Infinity, uMax = -Infinity, far = 0;
+  for (let py = 0; py < img.height; py += 3) {
+    for (let px = 0; px < img.width; px += 3) {
+      if (img.data[(py * img.width + px) * 4 + 3] <= 60) continue;
+      const x = px + b.x - f.ox, y = py + b.y - f.oy;
+      const u = x * f.tx + y * f.ty, v = x * f.nx + y * f.ny;
+      if (u < uMin) uMin = u;
+      if (u > uMax) uMax = u;
+      far = Math.max(far, Math.abs(v - cut));
+    }
+  }
+  return { uMin, uMax, far };
+}
+
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+
+// つなぎめごとに、どれだけうまくつながっているかを調べて、合わせ方（拡大・縮小とずらし）と点数を決める
+function analyze(layout, layers) {
+  const data = layers.map((l) => l.ctx.getImageData(0, 0, l.cv.width, l.cv.height));
+  const n = layout.count;
+  // fit[i] = { lo, hi }：パート i の、手前のつなぎめ（lo）と向こうのつなぎめ（hi）での合わせ方
+  //   { s: 倍率, P: もとの中心, Q: 合わせたあとの中心, cut: つなぎめの位置 }
+  const fit = Array.from({ length: n }, () => ({ lo: null, hi: null, sv: 1 }));
+  const joints = [];
+  layout.cuts.forEach((cut, k) => {
+    const A = profile(layout, data, k, cut, -1), B = profile(layout, data, k + 1, cut, 1);
+    let sA = 1, sB = 1;
+    const Q = A.n && B.n ? (A.c + B.c) / 2 : null;
+    if (A.n && B.n && A.len >= 40 && B.len >= 40) {
+      const L = Math.sqrt(A.len * B.len); // 2人の「はば」のまんなか（倍率で見たまんなか）に合わせる
+      sA = clamp(L / A.len, 0.5, 2);
+      sB = clamp(L / B.len, 0.5, 2);
+    }
+    if (Q !== null) {
+      fit[k].hi = { s: sA, P: A.c, Q, cut };
+      fit[k + 1].lo = { s: sB, P: B.c, Q, cut };
+    }
+    joints.push({ A, B, sA, sB, Q });
+  });
+
+  // はしのパート（つなぎめが1つ）は、絵がわくの外に出ないように倍率をおさえる
+  fit.forEach((ft, i) => {
+    const one = ft.lo && !ft.hi ? ft.lo : ft.hi && !ft.lo ? ft.hi : null;
+    if (!one) return;
+    ft.sv = one.s;
+    if (one.s <= 1) return;
+    const ex = extent(layout, data[i], i, one.cut);
+    if (ex.far > 1) ft.sv = clamp(layout.depth / ex.far, 1, one.s);
+    const left = one.P - ex.uMin, right = ex.uMax - one.P;
+    let s = one.s;
+    if (left > 1) s = Math.min(s, (one.Q + 10) / left);
+    if (right > 1) s = Math.min(s, (layout.edgeLen - one.Q + 10) / right);
+    one.s = Math.max(1, s);
+    ft.sv = Math.min(ft.sv, one.s);
+  });
+
+  // 点数：合わせる前の絵が、どれだけ合っていたか（はば・位置・線の本数）＋合わせたあとのずれ
+  const scores = joints.map((j, k) => {
+    const { A, B } = j;
+    if (!A.n && !B.n) return 20;
+    if (!A.n || !B.n) return 15;
+    const thin = A.len < 40 && B.len < 40;
+    const r = thin ? 1 : Math.min(A.len, B.len) / Math.max(A.len, B.len);
+    const p = 1 - Math.min(1, Math.abs(A.c - B.c) / 300);
+    const kk = Math.min(A.n, B.n) / Math.max(A.n, B.n);
+    const fa = fit[k].hi, fb = fit[k + 1].lo;
+    const mapA = (u) => fa.Q + fa.s * (u - fa.P), mapB = (u) => fb.Q + fb.s * (u - fb.P);
+    const gap = (Math.abs(mapA(A.a) - mapB(B.a)) + Math.abs(mapA(A.b) - mapB(B.b))) / 2;
+    const q = 1 - Math.min(1, gap / 150);
+    return Math.round(100 * (0.4 * r + 0.3 * p + 0.2 * kk + 0.1 * q));
+  });
+  const score = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+  return { fit, scores, score };
+}
+
+// ---------- 合体 ----------
+// 1. 全員の絵を少しずつ描く → 2. つなぎめが合うように、それぞれの絵を拡大・縮小してずらす → 3. 点数を出す
+// hooks：{ onFit(), onDone(result) }。result = { score, scores }
+export function startReveal(canvas, layout, partsOps, hooks = {}) {
+  canvas.width = layout.w;
+  canvas.height = layout.h;
+  canvas.style.setProperty('--ratio', String(layout.w / layout.h));
+  const ctx = canvas.getContext('2d');
+  const layers = layout.regions.map((r) => new Layer(r));
+  const tasks = [];
+  partsOps.forEach((ops, pi) => (ops || []).forEach((op) => {
+    if (op.f) tasks.push([pi, op, -1]);
+    else for (let i = 0; i < op.p.length / 2; i++) tasks.push([pi, op, i]);
+  }));
+  const perFrame = Math.max(3, Math.ceil(tasks.length / 200)); // 描くところは全体で約3秒
+  const f = layout.frame;
+  let k = 0, timer = null, stopped = false, result = null, amount = 0;
+
+  // 絵の座標での変形を、キャンバスにセットする。u' = Q + a(u - P)、v' = C + b(v - C)
+  function setWarp(a, b, Q, P, C) {
+    const m11 = f.tx * a * f.tx + f.nx * b * f.nx, m12 = f.tx * a * f.ty + f.nx * b * f.ny;
+    const m21 = f.ty * a * f.tx + f.ny * b * f.nx, m22 = f.ty * a * f.ty + f.ny * b * f.ny;
+    const du = Q - a * P, dv = C - b * C;
+    const ex = f.ox + f.tx * du + f.nx * dv - (m11 * f.ox + m12 * f.oy);
+    const ey = f.oy + f.ty * du + f.ny * dv - (m21 * f.ox + m22 * f.oy);
+    ctx.setTransform(m11, m21, m12, m22, ex, ey);
+  }
+
+  // t = 0：描いたまま、t = 1：つなぎめを合わせた形
+  function compose(t, dividers) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, SIZE, SIZE);
-    layers.forEach((l) => ctx.drawImage(l, 0, 0));
+    ctx.fillRect(0, 0, layout.w, layout.h);
+    layers.forEach((layer, i) => {
+      const b = layer.reg.bbox, ft = result && t > 0 ? result.fit[i] : null;
+      if (!ft || (!ft.lo && !ft.hi)) { ctx.drawImage(layer.cv, b.x, b.y); return; }
+      const mix = (e) => ({ s: 1 + (e.s - 1) * t, P: e.P, Q: e.P + (e.Q - e.P) * t, cut: e.cut });
+      ctx.save();
+      ctx.clip(layer.reg.path);
+      if (!ft.lo || !ft.hi) { // はしのパート：つなぎめを動かさずに、全体を同じ倍率で大きく（小さく）する
+        const e = mix(ft.lo || ft.hi);
+        setWarp(e.s, 1 + (ft.sv - 1) * t, e.Q, e.P, e.cut);
+        ctx.drawImage(layer.cv, b.x, b.y);
+      } else { // まんなかのパート：手前と向こうで合わせ方がちがうので、細い帯に分けて少しずつ変える
+        const lo = mix(ft.lo), hi = mix(ft.hi), STRIPS = 24, step = (hi.cut - lo.cut) / STRIPS;
+        for (let sIdx = 0; sIdx < STRIPS; sIdx++) {
+          const v0 = lo.cut + step * sIdx, w = (sIdx + 0.5) / STRIPS;
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.beginPath();
+          [[-4000, v0 - 0.6], [4000, v0 - 0.6], [4000, v0 + step + 0.6], [-4000, v0 + step + 0.6]].forEach(([u, v], idx) => {
+            const [x, y] = toWorld(f, u, v);
+            if (idx) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+          });
+          ctx.clip();
+          setWarp(lo.s + (hi.s - lo.s) * w, 1, lo.Q + (hi.Q - lo.Q) * w, lo.P + (hi.P - lo.P) * w, 0);
+          ctx.drawImage(layer.cv, b.x, b.y);
+          ctx.restore();
+        }
+      }
+      ctx.restore();
+    });
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (!dividers) return;
     ctx.save();
     ctx.setLineDash([14, 14]);
-    ctx.strokeStyle = 'rgba(0,0,0,.18)';
+    ctx.strokeStyle = 'rgba(0,0,0,.2)';
     ctx.lineWidth = 3;
-    regions.forEach((r) => ctx.stroke(r.path));
+    layout.cuts.forEach((cut) => {
+      const [x1, y1] = toWorld(f, 0, cut), [x2, y2] = toWorld(f, layout.edgeLen, cut);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    });
     ctx.restore();
   }
 
-  function frame() {
+  function drawFrame() {
     if (stopped) return;
     for (let n = 0; n < perFrame && k < tasks.length; n++) {
-      const [pi, s, i] = tasks[k++];
-      withClip(lctx[pi], regions[pi], () => drawSegment(lctx[pi], s, i));
+      const [pi, op, i] = tasks[k++];
+      if (i < 0) layers[pi].apply(op); else layers[pi].segment(op, i);
     }
-    compose(true);
-    if (k < tasks.length) timer = setTimeout(frame, 16);
-    else if (onDone) onDone();
+    compose(0, true);
+    if (k < tasks.length) { timer = setTimeout(drawFrame, 16); return; }
+    result = analyze(layout, layers);
+    if (hooks.onFit) hooks.onFit();
+    const began = Date.now();
+    const fitFrame = () => {
+      if (stopped) return;
+      const raw = Math.min(1, (Date.now() - began) / 1300);
+      amount = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2;
+      compose(amount, raw < 1);
+      if (raw < 1) { timer = setTimeout(fitFrame, 16); return; }
+      if (hooks.onDone) hooks.onDone({ score: result.score, scores: result.scores });
+    };
+    timer = setTimeout(fitFrame, 500);
   }
-  frame();
+  drawFrame();
 
   return {
     stop() { stopped = true; clearTimeout(timer); },
-    // 保存・シェア用：区切り線なしの絵を、別のキャンバスに写して返す
+    // 保存・シェア用：できあがった絵を、別のキャンバスに写して返す
     toCanvas() {
-      compose(false);
-      const copy = newLayer();
+      const copy = newCanvas(layout.w, layout.h);
+      compose(result ? 1 : 0, false);
       copy.getContext('2d').drawImage(canvas, 0, 0);
-      compose(true);
+      compose(amount, amount < 1);
       return copy;
-    },
-    // 区切り線なしの絵だけ（背景なし）
-    toPNG() { compose(false); const url = canvas.toDataURL('image/png'); compose(true); return url; },
-    // 共有用：区切り線なしの画像ファイルの中身
-    toBlob() {
-      return new Promise((resolve) => {
-        compose(false);
-        canvas.toBlob((blob) => { compose(true); resolve(blob); }, 'image/png');
-      });
     },
   };
 }

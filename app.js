@@ -1,17 +1,17 @@
 // app.js
 // 画面とゲームの流れ。企画の図のとおりに進む：
-//   S（シングル）  → 難易度 A/B/C → 対AI
+//   S（シングル）  → 難易度 A/B/C → ひとりで合体（2つのパートを順番に描く）
 //   対（対戦）     → 難易度 A/B/C → オンライン（同じ難易度の部屋へ自動で入る）
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, TOPICS, pick } from './topics.js?v=20261114135104';
-import { AI_DRAWINGS, aiTopics } from './ai.js?v=20261114135104';
-import { Pad, makeLayout, pickLayout, drawLayoutPreview, LAYOUT_NAMES, animateReveal } from './draw.js?v=20261114135104';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261114135104';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261114135104';
-import { makeCard } from './card.js?v=20261114135104';
-import * as net from './net.js?v=20261114135104';
+import { LEVELS, TOPICS, WIDE_TOPICS, nextTopic, markTopic } from './topics.js?v=20261116160722';
+import { sampleOps } from './samples.js?v=20261116160722';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal } from './draw.js?v=20261116160722';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116160722';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116160722';
+import { makeCard } from './card.js?v=20261116160722';
+import * as net from './net.js?v=20261116160722';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -21,10 +21,10 @@ const INTRO_MS = 4000;
 const SITE_URL = 'https://orjapps.github.io/oekaki-gattai/'; // シェアするときに入れる公開先
 // スマホかタブレットなら true（iPad は Mac と名のるので、タッチできるかどうかも見る）
 const IS_PHONE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
-const MAX_PLAYERS = 4;
+const MAX_PLAYERS = 5;
 const SEATS = [
   { name: '赤', color: '#ff5252' }, { name: '青', color: '#3ec5ff' },
-  { name: '緑', color: '#3ddc84' }, { name: '黄', color: '#ffc928' },
+  { name: '緑', color: '#3ddc84' }, { name: '黄', color: '#ffc928' }, { name: '紫', color: '#b388ff' },
 ];
 const COLORS = ['#1e1e1e', '#e53935', '#fb8c00', '#f9a825', '#43a047', '#1e88e5', '#8e24aa', '#ec6a9c', '#795548', '#8a8f98'];
 const WIDTHS = [['細', 6], ['中', 12], ['太', 26]];
@@ -36,7 +36,7 @@ const me = { id: '', pub: '', sign: null, typed: '', name: '' };
 const G = {
   phase: 'title', mode: null, level: null,
   room: null, chan: null, players: [], ready: false, joinedAt: 0, starting: false, busy: false, lobbySig: '',
-  round: null, regions: [], parts: {}, done: new Set(), submitted: false, pad: null, reveal: null, seen: {},
+  round: null, layout: null, roomTopics: new Set(), parts: {}, done: new Set(), submitted: false, pad: null, reveal: null, seen: {},
   timers: [], beat: null, resend: null, endAt: 0,
   // なりすまし対策：keys = 本物と確かめた人の鍵、orderIds = 部屋に来た順、seenRounds = もう使ったラウンドの番号
   keys: new Map(), pending: new Set(), lastList: [], orderIds: [], goneAt: {}, joinTimes: {}, admitted: false,
@@ -45,7 +45,8 @@ const G = {
 
 // ---------- 絵（SVG）。中身はこのファイルに書いた決まった文字だけ ----------
 const ICONS = {
-  robot: '<path d="M12 3.5V6M6 7h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="9" cy="12" r="1.4" fill="currentColor"/><circle cx="15" cy="12" r="1.4" fill="currentColor"/><path d="M9.5 16h5"/><circle cx="12" cy="2.6" r="1" fill="currentColor"/>',
+  pen: '<path d="M4 20l1-5L16 4l4 4L9 19l-5 1Z"/><path d="M13.5 6.5l4 4"/>',
+  bucket: '<path d="M4 12l8-8 8 8-7 7a2 2 0 0 1-2.8 0L4 12.8Z"/><path d="M4 12h16M9 3l3 3"/><path d="M20 16c1 1.5 1.5 2.5 1.5 3.3a1.5 1.5 0 0 1-3 0c0-.8.5-1.8 1.5-3.3Z" fill="currentColor"/>',
   people: '<circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 20c.5-4 2.5-6 5.5-6s5 2 5.5 6M14.5 14.6c3-.6 5.8.8 6.8 5"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M14 9l2.5 2.5"/>',
   door: '<path d="M4 21V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v16M2 21h20"/><path d="M10.5 9v6M7.5 12h6"/>',
@@ -213,7 +214,7 @@ function titleScreen() {
     h('p', { class: 'tagline' }, 'お題を分けて描いて、最後に1枚に合体！'),
     h('label', { class: 'nametag', for: 'name' }, h('span', {}, 'なまえ'), name),
     h('nav', { class: 'menu' },
-      card('#ff5d8f', icon('robot'), 'シングル', 'AIと合体する', go(() => levelScreen('single'))),
+      card('#ff5d8f', icon('pen'), 'シングル', 'ひとりで2つ描いて合体', go(() => levelScreen('single'))),
       card('#3ec5ff', icon('people'), '対戦', '難易度を選ぶと部屋に入る', go(() => levelScreen('online'))),
       card('#3ddc84', icon('key'), 'フレンド', 'カギで集まる', go(friendScreen))),
     h('p', { class: 'status ' + (net.online ? 'on' : 'off') }, h('i', {}),
@@ -223,8 +224,8 @@ function titleScreen() {
 }
 
 // ---------- 画面：難易度 A/B/C ----------
-// next：single = 対AI ／ online = オンラインの部屋へ ／ friend = 部屋を作ってカギを発行
-const LEVEL_LOOK = { A: ['#3ddc84', 'rows', 1], B: ['#ff9a3c', 'diag', 2], C: ['#ff5252', 'zigRows', 3] };
+// next：single = ひとりで合体 ／ online = オンラインの部屋へ ／ friend = 部屋を作ってカギを発行
+const LEVEL_LOOK = { A: ['#3ddc84', 'rows', 1], B: ['#ff9a3c', 'diag', 2], C: ['#ff5252', 'diagR', 3] };
 function levelScreen(next) {
   const title = { single: 'シングル', online: '対戦', friend: '部屋を作る' }[next];
   show('level-' + next,
@@ -250,7 +251,7 @@ async function chooseLevel(next, level) {
     if (!room) {
       room = await net.api.createRoom({
         // Supabase ではカギをサーバーが決める。この code は、お試しモードのときだけ使われる
-        code: next === 'friend' ? String(Math.floor(1e9 + Math.random() * 9e9)) : null,
+        code: next === 'friend' ? String(Math.floor(1000 + Math.random() * 9000)) : null,
         mode: next, difficulty: level, status: 'waiting', player_count: 1,
       });
     }
@@ -264,8 +265,8 @@ async function chooseLevel(next, level) {
 }
 
 // ---------- 画面：フレンド（カギ／部屋） ----------
-// カギは10けた。見やすいように「123-456-7890」と区切って見せる（コピーされるのは数字だけ）
-const KEY_LENGTH = 10;
+// カギは4けた。Supabase の設定が古いあいだは10けたのカギが出るので、10けたも受けつける
+const KEY_LENGTH = 4;
 const formatKey = (code) => String(code).replace(/^(\d{3})(\d{3})(\d{4})$/, '$1-$2-$3');
 function friendScreen() {
   show('friend',
@@ -278,12 +279,12 @@ function friendScreen() {
 }
 
 function keyScreen() {
-  // 「123-456-7890」のように区切りが入っていてもよい（数字だけを使う）
-  const input = h('input', { class: 'input key', inputmode: 'numeric', maxlength: 16, placeholder: '000-000-0000', autocomplete: 'off', 'aria-label': 'カギ' });
-  const msg = h('p', { class: 'note', role: 'status' }, '友だちに教えてもらった10けたのカギを入れてね（貼りつけOK）');
+  // 区切りが入っていてもよい（数字だけを使う）
+  const input = h('input', { class: 'input key', inputmode: 'numeric', maxlength: 16, placeholder: '0000', autocomplete: 'off', 'aria-label': 'カギ' });
+  const msg = h('p', { class: 'note', role: 'status' }, '友だちに教えてもらった4けたのカギを入れてね');
   const go = async () => {
     const code = input.value.replace(/\D/g, '');
-    if (code.length !== KEY_LENGTH) { sfx('error'); msg.textContent = `カギは${KEY_LENGTH}けたの数字です`; return; }
+    if (code.length !== KEY_LENGTH && code.length !== 10) { sfx('error'); msg.textContent = `カギは${KEY_LENGTH}けたの数字です`; return; }
     msg.textContent = 'さがしています…';
     try {
       const room = await net.api.roomByCode(code);
@@ -318,7 +319,7 @@ async function enterRoom(room) {
   G.pending = new Set(); G.lastList = []; G.orderIds = []; G.goneAt = {}; G.joinTimes = {}; G.admitted = false;
   // 入ってから3秒たったら、席の順番を確定させる（満員かどうかもここで決まる）
   setTimeout(() => { if (G.room === room) onPresence(G.lastList); }, 3200);
-  G.seenRounds = new Set(); G.queue = Promise.resolve();
+  G.seenRounds = new Set(); G.queue = Promise.resolve(); G.roomTopics = new Set();
   G.joinedAt = Date.now();
   G.phase = 'lobby';
   G.chan = await net.api.join(room.id, myState(), { presence: onPresence, event: onEvent });
@@ -444,10 +445,10 @@ function hostCheck() {
 function startRound() {
   G.starting = true;
   const ps = G.players;
-  const topic = pick(TOPICS[G.room.difficulty] || TOPICS.A);
+  const topic = nextTopic(G.room.difficulty, G.roomTopics); // まだ出ていないお題からえらぶ
   sendSigned('start', {
     id: crypto.randomUUID(), topic, count: ps.length, seconds: DRAW_SECONDS,
-    layout: pickLayout(G.room.difficulty, ps.length),
+    layout: pickLayout(G.room.difficulty, ps.length, WIDE_TOPICS.has(topic)),
     order: ps.map((p) => ({ id: p.id, name: p.name })),
   });
   net.api.updateRoom(G.room, { status: 'playing', player_count: ps.length });
@@ -486,7 +487,7 @@ function validStart(d, from) {
   const ids = d.order.map((o) => (o && typeof o.id === 'string' ? o.id : ''));
   if (new Set(ids).size !== ids.length || !ids.every((id) => G.keys.has(id)) || !ids.includes(from)) return false;
   if (!(TOPICS[G.room.difficulty] || []).includes(d.topic)) return false;
-  if (!Object.prototype.hasOwnProperty.call(LAYOUT_NAMES, d.layout)) return false;
+  if (!layoutsFor(d.count).includes(d.layout)) return false;
   return Number.isInteger(d.seconds) && d.seconds >= 5 && d.seconds <= 600;
 }
 
@@ -494,9 +495,11 @@ function handleStart(d, from) {
   if (G.phase !== 'lobby') return;
   if (!validStart(d, from)) { log('rejected: invalid start'); return; }
   G.seenRounds.add(d.id);
+  G.roomTopics.add(d.topic); // この部屋で出たお題。次からは出さない
   const index = d.order.findIndex((o) => o.id === me.id);
   // 自分が入っていない、または自分が「準備OK」を押していないラウンドには参加しない
   if (index < 0 || !G.ready) { G.busy = true; G.lobbySig = ''; renderLobby(); return; }
+  markTopic(d.topic);
   const nameOf = (o) => (G.players.find((p) => p.id === o.id) || {}).name || String(o.name == null ? '？' : o.name).slice(0, 12);
   beginRound({
     id: d.id, topic: d.topic, count: d.count, seconds: d.seconds, layout: d.layout,
@@ -511,8 +514,8 @@ function handlePart(d, from) {
   const index = r.order.findIndex((o) => o.id === from);
   if (index < 0 || d.id !== from || d.part !== index) { log('rejected: part from wrong sender'); return; }
   if (G.done.has(from)) return;
-  log(`part received: part=${d.part} strokes=${Array.isArray(d.strokes) ? d.strokes.length : 'none'} phase=${G.phase}`);
-  G.parts[index] = cleanStrokes(d.strokes);
+  log(`part received: part=${d.part} ops=${Array.isArray(d.ops) ? d.ops.length : 'none'} phase=${G.phase}`);
+  G.parts[index] = cleanOps(d.ops);
   G.done.add(from);
   if (G.phase === 'reveal') { stopReveal(); G.phase = 'wait'; revealScreen(); return; }
   updateWaitText();
@@ -569,13 +572,14 @@ function renderLobby() {
   );
 }
 
-// ---------- シングル（対AI） ----------
+// ---------- シングル（ひとりで合体） ----------
+// 1人で2つのパートを順番に描く。2つ目を描くときは、1つ目の絵は見えない
 function startSolo() {
-  const topic = pick(aiTopics(G.level));
-  const myPart = Math.random() < 0.5 ? 0 : 1; // 2つのパートのどちらかだけを描く
+  const topic = nextTopic(G.level);
+  markTopic(topic);
   beginRound({
-    id: crypto.randomUUID(), topic, count: 2, layout: pickLayout(G.level, 2), seconds: DRAW_SECONDS, solo: true, myPart,
-    owners: myPart === 0 ? [me.name, 'AI'] : ['AI', me.name],
+    id: crypto.randomUUID(), topic, count: 2, layout: pickLayout(G.level, 2, WIDE_TOPICS.has(topic)), seconds: DRAW_SECONDS, solo: true, myPart: 0,
+    owners: [me.name, me.name],
   });
 }
 
@@ -584,32 +588,45 @@ function beginRound(round) {
   clearTimers();
   clearInterval(G.resend);
   G.round = round;
-  G.regions = makeLayout(round.layout, round.count);
+  G.layout = makeLayout(round.layout, round.count);
   G.parts = {};
   G.done = new Set();
   G.submitted = false;
   G.ready = false;
   G.seen = {};
+  introScreen();
+}
+
+// お題と、自分が描くパートを見せる（シングルでは、2つ目のパートの前にも出る）
+function introScreen() {
+  const r = G.round, regs = G.layout.regions;
+  clearTimers();
   G.phase = 'intro';
   track();
-  const label = G.regions[round.myPart].label;
+  const second = r.solo && r.myPart > 0;
   const preview = h('canvas', { class: 'preview', id: 'preview' });
-  drawLayoutPreview(preview, G.regions, round.myPart);
+  drawLayoutPreview(preview, G.layout, r.myPart);
   sfx('topic');
-  show('intro',
+  show('intro-' + r.myPart,
     h('div', { class: 'spots', 'aria-hidden': 'true' }, h('i', {}), h('i', {})),
-    board(round.topic, false),
+    board(r.topic, false),
     h('div', { class: 'brief' }, preview,
-      h('div', {}, h('p', { class: 'lead' }, 'あなたが描くのは'), h('p', { class: 'part-name' }, `「${label}」`),
-        h('p', { class: 'note', id: 'layout-name' }, `分け方：${LAYOUT_NAMES[round.layout] || LAYOUT_NAMES.rows}`))),
+      h('div', {}, h('p', { class: 'lead' }, second ? 'つぎに描くのは' : 'あなたが描くのは'), h('p', { class: 'part-name' }, `「${regs[r.myPart].label}」`),
+        h('p', { class: 'note', id: 'layout-name' }, `分け方：${LAYOUT_NAMES[G.layout.id]}（${r.count}つに分ける）`))),
     h('div', { class: 'fuse', 'aria-hidden': 'true' }, h('i', { style: `animation-duration:${INTRO_MS}ms` })),
-    h('p', { class: 'note' }, 'ほかのパートは、合体まで見えません'),
+    h('p', { class: 'note' }, second ? 'さっき描いた絵は、合体まで見えません' : 'ほかのパートは、合体まで見えません'),
+    h('p', { class: 'note tip' }, 'コツ：金色の点線まで線をのばすと、となりの絵とつながります'),
   );
   later(drawScreen, INTRO_MS);
 }
 
+// キャンバスを入れるわく。形（横÷たて）に合わせて大きさが変わる
+function easelFor(canvas, ratio, scroll) {
+  return h('div', { class: 'easel' + (scroll && ratio < 0.75 ? ' tall' : ''), style: `--ratio:${ratio}` }, canvas);
+}
+
 function drawScreen() {
-  const r = G.round;
+  const r = G.round, regs = G.layout.regions;
   G.phase = 'draw';
   track();
   sfx('go');
@@ -617,7 +634,11 @@ function drawScreen() {
   const timer = h('b', { id: 'timer' }, '');
   const bar = h('i', {});
   const clock = h('div', { class: 'clock' }, icon('clock'), timer, h('span', { class: 'timebar' }, bar));
-  const pad = new Pad(canvas, r.myPart, G.regions);
+  // つなぎめに出すひとこと（となりのパートの名前）
+  const pad = new Pad(canvas, G.layout, r.myPart, {
+    prev: r.myPart > 0 ? `「${regs[r.myPart - 1].label}」の絵とつながる線` : '',
+    next: r.myPart < r.count - 1 ? `「${regs[r.myPart + 1].label}」の絵とつながる線` : '',
+  });
   G.pad = pad;
 
   function mark(el, group) {
@@ -625,9 +646,18 @@ function drawScreen() {
     el.classList.add('on');
     el.setAttribute('aria-pressed', 'true');
   }
+  // 道具：ペン／ぬりつぶし／消しゴム
+  const toolButtons = [['pen', 'pen', 'ペン'], ['fill', 'bucket', 'ぬりつぶし'], ['eraser', 'eraser', '消しゴム']].map(([id, ic, name]) => h('button', {
+    class: 'tool t' + (id === pad.tool ? ' on' : ''), id: 'tool-' + id, 'aria-pressed': id === pad.tool ? 'true' : 'false',
+    onclick: (e) => { pad.tool = id; mark(e.currentTarget, '.tool.t'); },
+  }, icon(ic), name));
   const colorButtons = COLORS.map((c) => h('button', {
     class: 'swatch' + (c === pad.color ? ' on' : ''), style: `--sw:${c}`, 'aria-label': '色 ' + c, 'aria-pressed': c === pad.color ? 'true' : 'false',
-    onclick: (e) => { pad.color = c; pad.erase = false; mark(e.currentTarget, '.swatch, .eraser'); },
+    onclick: (e) => {
+      pad.color = c;
+      mark(e.currentTarget, '.swatch');
+      if (pad.tool === 'eraser') { pad.tool = 'pen'; mark(toolButtons[0], '.tool.t'); } // 色をえらんだら、消しゴムをやめる
+    },
   }));
   const widthButtons = WIDTHS.map(([name, w]) => h('button', {
     class: 'tool w' + (w === pad.width ? ' on' : ''), 'aria-label': 'ペンの太さ ' + name, 'aria-pressed': w === pad.width ? 'true' : 'false',
@@ -650,17 +680,18 @@ function drawScreen() {
     if (left <= 0) submitPart();
   };
 
-  show('draw',
+  const b = regs[r.myPart].bbox;
+  show('draw-' + r.myPart,
     board(r.topic, true),
-    h('div', { class: 'row' }, h('span', { class: 'chip gold' }, `あなたは「${G.regions[r.myPart].label}」`), clock),
-    h('div', { class: 'easel' }, canvas),
+    h('div', { class: 'row' }, h('span', { class: 'chip gold' }, `あなたは「${regs[r.myPart].label}」`), clock),
+    easelFor(canvas, b.w / b.h),
     h('div', { class: 'tools' },
+      h('div', { class: 'toolrow' }, toolButtons),
       h('div', { class: 'toolrow' }, colorButtons),
       h('div', { class: 'toolrow' }, widthButtons,
-        h('button', { class: 'tool eraser', 'aria-pressed': 'false', onclick: (e) => { pad.erase = true; mark(e.currentTarget, '.swatch, .eraser'); } }, icon('eraser'), '消しゴム'),
         h('button', { class: 'tool', onclick: () => pad.undo() }, icon('undo'), '1つもどす'),
         h('button', { class: 'tool', onclick: () => pad.clear() }, icon('trash'), '全部消す'))),
-    h('p', { class: 'note', id: 'wait-text', role: 'status' }, '明るいところだけ描けます'),
+    h('p', { class: 'note', id: 'wait-text', role: 'status' }, '金色の点線が、となりの絵とのつなぎめ。線を点線までのばそう'),
     h('button', { class: 'btn primary go', id: 'done-btn', onclick: submitPart }, icon('check'), 'できた！'),
   );
   tick();
@@ -671,32 +702,33 @@ function submitPart() {
   if (G.submitted || !G.pad) return;
   G.submitted = true;
   const r = G.round;
-  const strokes = G.pad.getStrokes();
+  const ops = cleanOps(G.pad.getOps());
   G.pad.enabled = false;
   clearTimers();
   sfx('done');
+  G.parts[r.myPart] = ops;
   if (r.solo) {
-    G.parts[r.myPart] = strokes;
-    revealScreen();
+    // シングル：次のパートがあれば、それを描く。全部描いたら合体
+    if (r.myPart < r.count - 1) { r.myPart++; G.submitted = false; G.pad = null; introScreen(); }
+    else revealScreen();
     return;
   }
   G.phase = 'wait';
   track();
   const btn = document.getElementById('done-btn');
   if (btn) btn.remove();
-  G.parts[r.myPart] = strokes;
   G.done.add(me.id);
   const timerEl = document.getElementById('timer');
   if (timerEl) timerEl.textContent = '完成！';
   $app.classList.add('waiting');
-  log(`part sent: part=${r.myPart} strokes=${strokes.length}`);
+  log(`part sent: part=${r.myPart} ops=${ops.length}`);
   // 1回だけの送信は、接続が一瞬切れていると届かない。3秒ごとに送り直す（最低8回、全員ぶんがそろうまで最大40回）
   let tries = 0;
   const sendPart = () => {
     // 自分は全員ぶんを持っていても、相手に届いていないことがある。最低8回は送る
     if (!G.chan || G.round !== r || tries >= 40 || (tries >= 8 && G.done.size >= r.order.length)) return;
     tries++;
-    sendSigned('part', { round: r.id, id: me.id, part: r.myPart, strokes })
+    sendSigned('part', { round: r.id, id: me.id, part: r.myPart, ops })
       .then((res) => log(`part send #${tries}: ${JSON.stringify(res)}`), (err) => log('part send error: ' + err));
   };
   sendPart();
@@ -724,26 +756,48 @@ function checkAllParts() {
   if (needed.every((o) => G.done.has(o.id))) revealScreen();
 }
 
+// 点数にそえるひとこと
+const BEST_KEY = 'oekaki_best_score';
+function rankWord(score) {
+  if (score >= 90) return 'ぴったり合体！';
+  if (score >= 75) return 'いいかんじ！';
+  if (score >= 55) return 'おしい！';
+  if (score >= 35) return 'ちぐはぐ合体！';
+  return 'バラバラ！それも味';
+}
+
 function revealScreen() {
   if (G.phase === 'reveal') return;
-  const r = G.round;
+  const r = G.round, regs = G.layout.regions;
   log(`reveal: parts=${Object.keys(G.parts).map((k) => k + ':' + G.parts[k].length).join(',')} done=${G.done.size}`);
   clearTimers();
   $app.classList.remove('waiting');
   G.phase = 'reveal';
   track();
   const parts = [];
-  for (let i = 0; i < r.count; i++) {
-    parts.push(r.solo && i !== r.myPart ? AI_DRAWINGS[r.topic].draw() : (G.parts[i] || []));
-  }
+  for (let i = 0; i < r.count; i++) parts.push(G.parts[i] || []);
+  const seatColor = (i) => (r.solo ? SEATS[0].color : SEATS[i % SEATS.length].color);
   const canvas = h('canvas', { class: 'pad', id: 'result' });
   const status = h('p', { class: 'merging', id: 'reveal-status', role: 'status' }, '合体中…');
   const caption = h('p', { class: 'chips', id: 'caption' },
-    r.owners.map((name, i) => h('span', { class: 'chip', style: `--seat:${r.solo ? (name === 'AI' ? '#b9c2e6' : SEATS[0].color) : SEATS[i % SEATS.length].color}` },
-      h('i', { class: 'dot' }), `${G.regions[i].label}：${name}`)));
-  // Xでシェア：お題とハッシュタグとサイトのURLを入れる（なまえは入れない）
-  const SHARE_TEXT = `お題「${r.topic}」を分けて描いて合体したら、こうなった。\n#お絵かき合体`;
-  const X_POST_URL = 'https://x.com/intent/post?text=' + encodeURIComponent(SHARE_TEXT + '\n') + '&url=' + encodeURIComponent(SITE_URL);
+    r.owners.map((name, i) => h('span', { class: 'chip', style: `--seat:${seatColor(i)}` }, h('i', { class: 'dot' }), `${regs[i].label}：${name}`)));
+  // 点数（つながり度）。合体が終わったら出す
+  const scoreNum = h('b', { id: 'score' }, '0');
+  const rank = h('em', { id: 'rank' }, '');
+  const scoreNote = h('p', { class: 'note', id: 'score-note' }, '');
+  const scoreBox = h('div', { class: 'scorebox', id: 'scorebox', hidden: true },
+    h('small', {}, 'つながり度'), h('span', { class: 'points' }, scoreNum, '点'), rank);
+  // 見本（おてほん）。合体が終わったら、絵の左上に出す
+  const sample = sampleOps(r.topic);
+  let sampleCv = null;
+  if (sample) { sampleCv = h('canvas', {}); drawSample(sampleCv, sample, 300); }
+  // 押すと大きくなる（もう一度押すと小さくなる）
+  const sampleBox = sampleCv ? h('figure', { class: 'sample', id: 'sample', hidden: true, title: '押すと大きくなる', onclick: (e) => e.currentTarget.classList.toggle('big') }, sampleCv, h('figcaption', {}, 'おてほん')) : null;
+
+  let finalScore = null;
+  // Xでシェア：お題と点数とハッシュタグとサイトのURLを入れる（なまえは入れない）
+  const shareText = () => `お題「${r.topic}」を分けて描いて合体したら、こうなった。${finalScore == null ? '' : `つながり度 ${finalScore}点！`}\n#お絵かき合体`;
+  const xPostUrl = () => 'https://x.com/intent/post?text=' + encodeURIComponent(shareText() + '\n') + '&url=' + encodeURIComponent(SITE_URL);
   let cardBlob = null; // シェア用の画像。合体が終わったら先に作っておく
   const buttons = h('div', { class: 'actions' },
     h('button', { class: 'btn', onclick: saveImage }, icon('save'), '画像を保存'),
@@ -751,16 +805,41 @@ function revealScreen() {
     h('button', { class: 'btn share', id: 'share-btn', onclick: IS_PHONE ? sharePhone : openShareDialog }, icon('x'), 'Xでシェア'),
     h('button', { class: 'btn primary', id: 'again-btn', onclick: () => { stopReveal(); if (r.solo) startSolo(); else lobbyScreen(); } }, icon('again'), 'もう一回'),
     h('button', { class: 'btn ghost', onclick: () => { stopReveal(); if (!r.solo) leaveRoom(); titleScreen(); } }, icon('home'), 'やめる'));
-  const easel = h('div', { class: 'easel' }, canvas);
-  show('reveal', board(r.topic, true), status, easel, caption, buttons);
+  const easel = easelFor(canvas, G.layout.w / G.layout.h, true);
+  if (sampleBox) easel.append(sampleBox);
+  show('reveal', board(r.topic, true), status, scoreBox, scoreNote, easel, caption, buttons);
   sfx('merge');
-  G.reveal = animateReveal(canvas, parts, G.regions, () => {
-    status.textContent = '合体！';
-    status.className = 'stamp';
-    easel.classList.add('flash');
-    sfx('fanfare');
-    confetti();
-    makeBlob().then((blob) => { cardBlob = blob; }).catch(() => {});
+  G.reveal = startReveal(canvas, G.layout, parts, {
+    onFit: () => { status.textContent = 'つなげています…'; },
+    onDone: (result) => {
+      finalScore = result.score;
+      status.textContent = '合体！';
+      status.className = 'stamp';
+      easel.classList.add('flash');
+      sfx('fanfare');
+      confetti();
+      if (sampleBox) sampleBox.hidden = false;
+      // 点数を 0 から数え上げる
+      scoreBox.hidden = false;
+      const began = Date.now();
+      const count = setInterval(() => {
+        const t = Math.min(1, (Date.now() - began) / 900);
+        scoreNum.textContent = String(Math.round(result.score * t));
+        if (t >= 1) clearInterval(count);
+      }, 30);
+      G.timers.push(count);
+      rank.textContent = rankWord(result.score);
+      let best = 0;
+      try { best = parseInt(localStorage.getItem(BEST_KEY), 10) || 0; } catch (e) { /* なくてもよい */ }
+      const joints = result.scores.length > 1 ? `つなぎめごと：${result.scores.map((s) => s + '点').join('・')}　` : '';
+      if (result.score > best) {
+        try { localStorage.setItem(BEST_KEY, String(result.score)); } catch (e) { /* 保存できなくてもよい */ }
+        scoreNote.textContent = joints + (best ? `自己ベスト更新！（前は ${best}点）` : 'これが最初の記録！');
+      } else {
+        scoreNote.textContent = joints + `自己ベスト：${best}点`;
+      }
+      makeBlob().then((blob) => { cardBlob = blob; }).catch(() => {});
+    },
   });
 
   // スマホ・タブレット：絵の画像つきで共有する（出てきた一覧から X をえらぶ）
@@ -769,13 +848,13 @@ function revealScreen() {
       const blob = cardBlob || await makeBlob();
       const file = new File([blob], 'oekaki-gattai.png', { type: 'image/png' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], text: `${SHARE_TEXT}\n${SITE_URL}` });
+        await navigator.share({ files: [file], text: `${shareText()}\n${SITE_URL}` });
         return;
       }
     } catch (err) {
       if (err && err.name === 'AbortError') return; // 共有をやめた
     }
-    window.open(X_POST_URL, '_blank', 'noopener,noreferrer'); // 共有の一覧が使えないときは X を開く
+    window.open(xPostUrl(), '_blank', 'noopener,noreferrer'); // 共有の一覧が使えないときは X を開く
   }
 
   // パソコン：X の投稿用リンクには絵をつけられない（X の決まり）。
@@ -810,7 +889,7 @@ function revealScreen() {
             h('button', { class: 'tool', onclick: copy }, icon('copy'), 'もう一度コピー'),
             h('button', { class: 'tool', onclick: saveImage }, icon('save'), '画像を保存'))),
         h('li', {}, h('b', {}, 'Xの投稿画面を開く'),
-          h('a', { class: 'btn share', id: 'open-x', href: X_POST_URL, target: '_blank', rel: 'noopener noreferrer' }, icon('x'), 'Xを開く')),
+          h('a', { class: 'btn share', id: 'open-x', href: xPostUrl(), target: '_blank', rel: 'noopener noreferrer' }, icon('x'), 'Xを開く')),
         h('li', {}, h('b', {}, `投稿画面で ${pasteKey} を押す`),
           h('p', { class: 'note' }, '絵が貼りつきます。そのまま投稿してください'))),
       h('button', { class: 'btn ghost', onclick: () => dlg.close() }, 'とじる'),
@@ -825,12 +904,11 @@ function revealScreen() {
     return resultCard().then((card) => new Promise((resolve) => card.toBlob(resolve, 'image/png')));
   }
 
-  // 保存・シェアする画像：絵に、ゲームの背景・タイトル・お題・描いた人をつけたもの（card.js）
+  // 保存・シェアする画像：絵に、ゲームの背景・タイトル・お題・点数・見本・描いた人をつけたもの（card.js）
   function resultCard() {
-    return makeCard(G.reveal.toCanvas(), r.topic, r.owners.map((name, i) => ({
-      text: `${G.regions[i].label}：${name}`,
-      color: r.solo ? (name === 'AI' ? '#b9c2e6' : SEATS[0].color) : SEATS[i % SEATS.length].color,
-    })));
+    return makeCard(G.reveal.toCanvas(), r.topic,
+      r.owners.map((name, i) => ({ text: `${regs[i].label}：${name}`, color: seatColor(i) })),
+      { score: finalScore, sample: sampleCv });
   }
 
   async function saveImage() {
@@ -844,13 +922,19 @@ function revealScreen() {
 
 function stopReveal() { if (G.reveal) { G.reveal.stop(); G.reveal = null; } }
 
-// 受け取った線を確かめる（形がおかしいものは捨てる）
-function cleanStrokes(strokes) {
-  if (!Array.isArray(strokes)) return [];
+// 受け取った絵（線とぬりつぶし）を確かめる。形がおかしいものは捨てる
+function cleanOps(ops) {
+  if (!Array.isArray(ops)) return [];
   const out = [];
-  let points = 0;
-  for (const s of strokes.slice(0, 3000)) {
+  let points = 0, fills = 0;
+  for (const s of ops.slice(0, 3000)) {
     if (!s || typeof s.c !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(s.c)) continue;
+    if (s.f) { // ぬりつぶし：1パートで60回まで（多すぎると合体が重くなる）
+      if (!Number.isFinite(s.x) || !Number.isFinite(s.y) || fills >= 60) continue;
+      fills++;
+      out.push({ f: 1, c: s.c, x: Math.round(s.x), y: Math.round(s.y) });
+      continue;
+    }
     if (!Array.isArray(s.p) || s.p.length < 2 || s.p.length % 2 || s.p.length > 20000) continue;
     if (!s.p.every((v) => Number.isFinite(v))) continue;
     points += s.p.length / 2;
@@ -877,6 +961,7 @@ document.addEventListener('click', (e) => {
   if (b && !b.classList.contains('mute') && !b.classList.contains('ghost') && b.id !== 'ready-btn' && b.id !== 'done-btn') sfx('tap');
 });
 startBackdrop();
+net.warm();
 window.addEventListener('pagehide', () => { if (G.chan) leaveRoom(); });
 // 自分の鍵を作る（対戦とフレンドで使う）。作れないブラウザでも、シングルは遊べる
 try {

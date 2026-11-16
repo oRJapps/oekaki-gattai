@@ -1,4 +1,4 @@
--- schema.sql（v4：部屋を守る版）
+-- schema.sql（v5：カギ4けた・5人まで）
 -- お絵かき合体：Supabase の SQL Editor に全部貼って、Run を1回押す。何回実行してもよい。
 --
 -- しくみ：
@@ -13,7 +13,7 @@
 
 create table if not exists public.rooms (
   id uuid primary key default gen_random_uuid(),
-  code text,                                  -- フレンド用のカギ（10けた）。対戦の部屋は null
+  code text,                                  -- フレンド用のカギ（4けた）。対戦の部屋は null
   mode text not null check (mode in ('online', 'friend')),
   difficulty text not null check (difficulty in ('A', 'B', 'C')),   -- A=初級 B=中級 C=上級
   status text not null default 'waiting' check (status in ('waiting', 'playing')),
@@ -109,12 +109,12 @@ begin
   end if;
   if p_mode = 'friend' then
     loop
-      -- 10けた（1000000000〜9999999999）。予測できない乱数（gen_random_uuid）から作る
-      v_code := (1000000000 + (('x' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 15))::bit(60)::bigint % 9000000000))::text;
+      -- 4けた（1000〜9999）。予測できない乱数（gen_random_uuid）から作る。いま使われているカギとは重ならない
+      v_code := (1000 + (('x' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 15))::bit(60)::bigint % 9000))::text;
       exit when not exists (
-        select 1 from rooms r where r.code = v_code and r.updated_at > now() - interval '10 minutes');
+        select 1 from rooms r where r.code = v_code and r.updated_at > now() - interval '30 minutes');
       v_tries := v_tries + 1;
-      if v_tries > 20 then raise exception 'no free key'; end if;
+      if v_tries > 60 then raise exception 'no free key'; end if;
     end loop;
   end if;
   insert into rooms (code, mode, difficulty, status, player_count, host_secret)
@@ -130,12 +130,13 @@ returns jsonb language sql stable security definer set search_path = public as $
   select jsonb_build_object('id', r.id, 'code', r.code, 'mode', r.mode, 'difficulty', r.difficulty)
   from rooms r
   where r.mode = 'online' and r.difficulty = p_difficulty and r.status = 'waiting'
-    and r.player_count < 4 and r.updated_at > now() - interval '45 seconds'
+    and r.player_count < 5 and r.updated_at > now() - interval '45 seconds'
   order by r.created_at asc
   limit 1;
 $$;
 
--- フレンド：カギから部屋を1つ返す（2分以内に更新された部屋だけ。なければ null）。
+-- フレンド：カギから部屋を1つ返す（30分以内に更新された部屋だけ。なければ null）。
+-- （部屋を作った人がスマホで別のアプリに切りかえると更新が止まるので、長めに待つ）
 -- 総当たり対策：同じ接続元から、まちがったカギが1分に10回きたら {"error":"locked"} を返す。
 -- 接続元が分からないときは、全体で1分に300回までにする。
 create or replace function public.room_by_code(p_code text)
@@ -152,11 +153,11 @@ begin
     return jsonb_build_object('error', 'locked');
   end if;
 
-  if p_code is not null and p_code ~ '^[0-9]{10}$' then
+  if p_code is not null and p_code ~ '^[0-9]{4}$' then
     select jsonb_build_object('id', r.id, 'code', r.code, 'mode', r.mode, 'difficulty', r.difficulty)
       into v_room
       from rooms r
-      where r.mode = 'friend' and r.code = p_code and r.updated_at > now() - interval '2 minutes'
+      where r.mode = 'friend' and r.code = p_code and r.updated_at > now() - interval '30 minutes'
       order by r.updated_at desc
       limit 1;
   end if;
@@ -171,7 +172,7 @@ create or replace function public.touch_room(p_id uuid, p_secret text, p_count i
 returns boolean language plpgsql security definer set search_path = public as $$
 begin
   update rooms
-    set player_count = least(4, greatest(1, coalesce(p_count, 1))),
+    set player_count = least(5, greatest(1, coalesce(p_count, 1))),
         status = case when p_status = 'playing' then 'playing' else 'waiting' end
     where id = p_id and host_secret is not null and host_secret = p_secret;
   return found;

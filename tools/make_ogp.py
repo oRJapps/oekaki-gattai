@@ -90,7 +90,7 @@ def pill(text, fnt, x, y, bg, fg=INK, pad=(22, 10), angle=0, border=4):
 pill("お題を分けて描いて、最後に1枚に合体！", font(FONT_TITLE, 30), 50, 216, PAPER, angle=1.5)
 
 body = font(FONT_BODY, 36)
-for n, line in enumerate(["半分だけ描くと、", "残りはAIか友だちが描く。", "だいたい変な生き物が生まれます。"]):
+for n, line in enumerate(["となりの絵は見えないまま", "半分だけ描いて、合体。", "だいたい変な生き物が生まれます。"]):
     d.text((58 * S, (312 + n * 50) * S), line, font=body, fill=(255, 255, 255))
 
 cx = 54
@@ -151,7 +151,7 @@ img.paste(merged, (CX * S, CY * S), merged)
 paste(sticker("合体！", font(FONT_TITLE, 56), RED, stroke=6, shadow=8, angle=8), (CX + CS - 236) * S, (CY - 150) * S)
 lx = CX - 6
 lx += pill("上：あなた", font(FONT_BODY, 24), lx, CY + CS + 30, (28, 43, 110), fg=(255, 255, 255), pad=(16, 8), border=3) + 4
-pill("下：AI", font(FONT_BODY, 24), lx, CY + CS + 30, (28, 43, 110), fg=(255, 255, 255), pad=(16, 8), border=3)
+pill("下：ともだち", font(FONT_BODY, 24), lx, CY + CS + 30, (28, 43, 110), fg=(255, 255, 255), pad=(16, 8), border=3)
 
 img.resize((1200, 630), Image.LANCZOS).save(OUT, optimize=True)
 print("saved", OUT)

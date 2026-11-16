@@ -12,9 +12,13 @@
 //   join(roomId, state, on)    部屋に入る。on.presence(一覧) と on.event(種類, 中身) が呼ばれる
 //                              戻り値：{ send(種類, 中身), update(自分の状態), leave() }
 
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261114135104';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261116160722';
 
-export const online = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+// ?trial=1 をつけて開くと、Supabase を使わずにお試しモードで動く（動作の確認用）
+const forceTrial = new URLSearchParams(location.search).has('trial');
+export const online = !forceTrial && !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+// 先に通信の部品を読みこんでおく（部屋に入るときの待ち時間をへらす）
+export function warm() { if (online) client().catch(() => {}); }
 
 // ---------- Supabase ----------
 let sb = null;
@@ -25,7 +29,7 @@ async function client() {
     if (!window.supabase) {
       await new Promise((resolve, reject) => {
         const tag = document.createElement('script');
-        tag.src = 'vendor/supabase.js?v=20261114135104';
+        tag.src = 'vendor/supabase.js?v=20261116160722';
         tag.onload = resolve;
         tag.onerror = () => reject(new Error('通信の部品を読みこめませんでした'));
         document.head.append(tag);
@@ -69,17 +73,24 @@ const supa = {
       on.presence(list);
     });
     ch.on('broadcast', { event: 'ev' }, ({ payload }) => on.event(payload.t, payload.d));
+    // 自分の状態は、つながるたびに送り直す（スマホで画面を切りかえると、接続が切れてつなぎ直しになるため）
+    let mine = state, live = false;
+    const push = () => { if (live) ch.track(mine).catch(() => {}); };
+    const onShow = () => { if (document.visibilityState === 'visible') push(); };
+    document.addEventListener('visibilitychange', onShow);
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('接続がタイムアウトしました')), 10000);
-      ch.subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') { clearTimeout(timer); await ch.track(state); resolve(); }
-        if (status === 'CHANNEL_ERROR') { clearTimeout(timer); reject(new Error('部屋に接続できませんでした')); }
+      ch.subscribe((status) => {
+        // つながったら、すぐに部屋の画面へ進む（状態の送信が終わるのを待たない）
+        if (status === 'SUBSCRIBED') { clearTimeout(timer); live = true; push(); resolve(); }
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { live = false; clearTimeout(timer); reject(new Error('部屋に接続できませんでした')); }
+        else if (status === 'CLOSED') live = false;
       });
     });
     return {
       send: (t, d) => ch.send({ type: 'broadcast', event: 'ev', payload: { t, d } }),
-      update: (next) => ch.track(next),
-      leave: () => c.removeChannel(ch),
+      update: (next) => { mine = next; push(); },
+      leave: () => { live = false; document.removeEventListener('visibilitychange', onShow); return c.removeChannel(ch); },
     };
   },
 };
@@ -97,13 +108,13 @@ const local = {
   async findRoom(level) {
     const now = Date.now();
     const list = Object.values(loadRooms()).filter((r) => r.mode === 'online' && r.difficulty === level
-      && r.status === 'waiting' && r.player_count < 4 && now - r.updated < 45000);
+      && r.status === 'waiting' && r.player_count < 5 && now - r.updated < 45000);
     list.sort((a, b) => a.created - b.created);
     return list[0] || null;
   },
   async roomByCode(code) {
     const now = Date.now();
-    const list = Object.values(loadRooms()).filter((r) => r.mode === 'friend' && r.code === code && now - r.updated < 120000);
+    const list = Object.values(loadRooms()).filter((r) => r.mode === 'friend' && r.code === code && now - r.updated < 1800000);
     list.sort((a, b) => b.updated - a.updated);
     return list[0] || null;
   },
