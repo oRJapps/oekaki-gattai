@@ -696,10 +696,10 @@ function features(src) {
   return { sil, hist, cells };
 }
 
-// 見本にどれだけ近いか（0〜100点）。形が4割、色の割合が2割、色の場所が4割
+// 見本にどれだけ近いか（0〜100点）。形が3割、色の割合が2割、色の場所が5割（数字は下の SCORE）
 //   形：2つの絵を重ねたとき、どちらにも絵がある所の割合（80%重なれば満点）
-//   色の割合：使っている色の割合が、どれだけ同じか（75%同じなら満点）
-//   色の場所：12×12 のますごとに、同じ色の種類かどうか（となりの色あいなら半分）
+//   色の割合：使っている色の割合が、どれだけ同じか（60%同じなら満点。近い色あいも数える）
+//   色の場所：12×12 のますごとに、同じ色の種類かどうか（近い色あい、線だけの所には部分点）
 export function similarity(picture, sample) {
   const a = features(picture), b = features(sample);
   if (!a || !b) return 0;
@@ -707,18 +707,33 @@ export function similarity(picture, sample) {
   for (let i = 0; i < a.sil.length; i++) { if (a.sil[i] || b.sil[i]) either++; if (a.sil[i] && b.sil[i]) both++; }
   const shape = either ? both / either : 0;
   let color = 0;
-  for (let i = 0; i < a.hist.length; i++) color += Math.min(a.hist[i], b.hist[i]);
+  // 色あいは、となりの色あいにも少し広げてからくらべる（赤とオレンジのような近い色で、0点にならないように）
+  const soft = (hist) => Array.from(hist, (v, i) => (i < 12 ? 0.5 * v + 0.25 * hist[(i + 1) % 12] + 0.25 * hist[(i + 11) % 12] : v));
+  const ha = soft(a.hist), hb = soft(b.hist);
+  for (let i = 0; i < ha.length; i++) color += Math.min(ha[i], hb[i]);
   let used = 0, same = 0;
   for (let i = 0; i < a.cells.length; i++) {
     const x = a.cells[i], y = b.cells[i];
     if (x < 0 && y < 0) continue;
     used++;
     if (x === y) same += 1;
-    else if (x >= 0 && y >= 0 && x < 12 && y < 12 && Math.min(Math.abs(x - y), 12 - Math.abs(x - y)) === 1) same += 0.5;
+    else if (x < 0 || y < 0) continue; // 片方だけ絵がある：0点
+    else if (x < 12 && y < 12) { // どちらも色つき：色あいが近いほど高い
+      const d = Math.min(Math.abs(x - y), 12 - Math.abs(x - y));
+      same += d === 1 ? SCORE.near1 : d === 2 ? SCORE.near2 : SCORE.far;
+    } else if (x === 14 || y === 14) same += SCORE.inside; // 線でかこんだだけで、ぬっていない：場所は合っているので、部分点
+    else same += SCORE.ink; // 黒や灰色の線と、色つきの所：少しだけ部分点
   }
   const place = used ? same / used : 0;
-  return Math.round(100 * (0.4 * Math.pow(Math.min(1, shape / 0.8), 1.5) + 0.2 * Math.min(1, color / 0.75) + 0.4 * place));
+  const raw = SCORE.wShape * Math.min(1, shape / SCORE.shapeFull) + SCORE.wColor * Math.min(1, color / SCORE.colorFull) + SCORE.wPlace * place;
+  return Math.round(100 * Math.pow(Math.max(0, Math.min(1, (raw - SCORE.low) / (SCORE.full - SCORE.low))), SCORE.curve));
 }
+// 点数のきびしさ。人が指で描いた絵でも点数が出るように、やさしめにしてある
+//   shapeFull：形がこれだけ重なれば満点／colorFull：色の割合がこれだけ同じなら満点
+//   near1・near2・far：色あいが 1つとなり・2つとなり・それより遠いときの部分点／inside：線だけ、ぬっていないときの部分点
+//   ink：黒い線と色つきの所の部分点／low：合計がこれ以下なら0点（らくがきに点数を出さないため）
+//   full：合計がこれだけあれば100点／curve：1より小さいほど、まんなかの点数が上がる
+export const SCORE = { wShape: 0.3, wColor: 0.2, wPlace: 0.5, shapeFull: 0.8, colorFull: 0.6, near1: 0.85, near2: 0.6, far: 0.15, inside: 0.8, ink: 0.2, low: 0.25, full: 0.9, curve: 0.7 };
 
 // 1つのパートだけを描いた絵を作る（シングルで、自分のパートと見本の同じパートをくらべるときに使う）
 export function partPicture(layout, part, ops) {
