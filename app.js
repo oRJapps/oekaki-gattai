@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, TOPICS, WIDE_TOPICS, nextTopic, markTopic } from './topics.js?v=20261116161304';
-import { sampleOps } from './samples.js?v=20261116161304';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal } from './draw.js?v=20261116161304';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116161304';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116161304';
-import { makeCard } from './card.js?v=20261116161304';
-import * as net from './net.js?v=20261116161304';
+import { LEVELS, TOPICS, WIDE_TOPICS, nextTopic, markTopic } from './topics.js?v=20261116161646';
+import { sampleOps } from './samples.js?v=20261116161646';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal } from './draw.js?v=20261116161646';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116161646';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116161646';
+import { makeCard } from './card.js?v=20261116161646';
+import * as net from './net.js?v=20261116161646';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -250,20 +250,23 @@ function chooseLevel(next, level) {
 // ---------- 画面：人数とカギを決める ----------
 // 対戦：人数だけ決める（同じ難易度・同じ人数の部屋に入る）。フレンド：人数と、4けたのカギを自分で決める
 function setupScreen(next, level, keep = {}) {
-  let size = keep.size || 2;
-  const row = h('div', { class: 'toolrow' });
-  [2, 3, 4, 5].forEach((n) => row.append(h('button', {
-    class: 'tool size' + (n === size ? ' on' : ''), 'aria-pressed': n === size ? 'true' : 'false',
-    onclick: (e) => {
-      size = n;
-      row.querySelectorAll('.size').forEach((x) => { const on = x === e.currentTarget; x.classList.toggle('on', on); x.setAttribute('aria-pressed', on ? 'true' : 'false'); });
-    },
-  }, `${n}人`)));
+  // 人数は半角数字で入力する（全角で入れても、半角に直して読む）。入れた人数で、絵を分ける数が決まる
+  const toHalf = (t) => t.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  const sizeInput = h('input', { class: 'size-input', id: 'room-size', inputmode: 'numeric', maxlength: 1, autocomplete: 'off', 'aria-label': '人数', value: String(keep.size || 2) });
+  const split = h('p', { class: 'note', id: 'split-note', role: 'status' }, '');
+  const readSize = () => { const n = parseInt(toHalf(sizeInput.value).replace(/\D/g, ''), 10); return n >= 2 && n <= MAX_PLAYERS ? n : 0; };
+  const paint = () => { const n = readSize(); split.textContent = n ? `絵を${n}つに分けます` : `2〜${MAX_PLAYERS}の数字を入れてね`; };
+  sizeInput.addEventListener('input', paint);
+  sizeInput.addEventListener('focus', () => sizeInput.select());
+  paint();
+  const row = h('div', { class: 'toolrow' }, sizeInput, h('span', { class: 'unit' }, '人'));
   const input = next === 'friend'
     ? h('input', { class: 'input key', id: 'new-key', inputmode: 'numeric', maxlength: 4, placeholder: '0000', autocomplete: 'off', 'aria-label': 'カギ', value: keep.code || '' }) : null;
   const msg = h('p', { class: 'note', role: 'status' }, keep.error
     || (input ? '好きな4けたの数字をカギにしてね。友だちには、この数字を教える' : '同じ人数をえらんだ人と、同じ部屋になります'));
   const go = () => {
+    const size = readSize();
+    if (!size) { sfx('error'); msg.textContent = `人数は2〜${MAX_PLAYERS}の半角数字で入れてね`; sizeInput.focus(); return; }
     let code = null;
     if (input) {
       code = input.value.replace(/\D/g, '');
@@ -271,10 +274,10 @@ function setupScreen(next, level, keep = {}) {
     }
     openRoom(next, level, size, code);
   };
-  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  [sizeInput, input].forEach((el) => { if (el) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); }); });
   show('setup-' + next,
     head(next === 'friend' ? '部屋を作る' : '対戦', input ? '人数とカギを決めよう' : '人数を決めよう'),
-    h('div', { class: 'tools' }, h('p', { class: 'lead' }, '何人で遊ぶ？（この人数で絵を分けます）'), row),
+    h('div', { class: 'tools' }, h('p', { class: 'lead' }, `何人で遊ぶ？（2〜${MAX_PLAYERS}の半角数字）`), row, split),
     input ? h('div', { class: 'ticket' }, h('small', {}, icon('key'), 'カギ（4けた）'), input,
       h('button', { class: 'tool', onclick: () => { input.value = String(Math.floor(Math.random() * 10000)).padStart(4, '0'); } }, 'おまかせ')) : null,
     msg,
