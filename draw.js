@@ -478,6 +478,19 @@ function analyze(layout, layers) {
     ft.sv = Math.min(ft.sv, one.s);
   });
 
+  // 小さいほうを大きくしきれなかったとき（わくの外に出てしまう、2倍をこえる）は、
+  // 残りのぶんだけ大きいほうを小さくして、つなぎめのはばを近づける（7割まで）
+  joints.forEach((j, k) => {
+    const fa = fit[k].hi, fb = fit[k + 1].lo;
+    if (!fa || !fb || j.A.len < 40 || j.B.len < 40) return;
+    const lenA = j.A.len * fa.s, lenB = j.B.len * fb.s;
+    const [big, bigIdx, ratio] = lenA > lenB ? [fa, k, lenB / lenA] : [fb, k + 1, lenA / lenB];
+    if (ratio > 0.97) return;
+    big.s = Math.max(0.7, big.s * ratio); // 小さくしすぎると、頭だけ小さい絵になるので、7割まで
+    const ft = fit[bigIdx];
+    if (!ft.lo || !ft.hi) ft.sv = big.s; // はしのパート：たても横も同じ倍率で小さくする（形をゆがめない）
+  });
+
   // 点数：合わせる前の絵が、どれだけ合っていたか（はば・位置・線の本数）＋合わせたあとのずれ
   const scores = joints.map((j, k) => {
     const { A, B } = j;
@@ -494,7 +507,7 @@ function analyze(layout, layers) {
     return Math.round(100 * (0.4 * r + 0.3 * p + 0.2 * kk + 0.1 * q));
   });
   const score = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
-  return { fit, scores, score };
+  return { fit, scores, score, joints };
 }
 
 // ---------- 合体 ----------
@@ -593,7 +606,7 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
       amount = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2;
       compose(amount, raw < 1);
       if (raw < 1) { timer = setTimeout(fitFrame, 16); return; }
-      if (hooks.onDone) hooks.onDone({ score: result.score, scores: result.scores });
+      if (hooks.onDone) hooks.onDone({ score: result.score, scores: result.scores, joints: result.joints, fit: result.fit });
     };
     timer = setTimeout(fitFrame, 500);
   }
