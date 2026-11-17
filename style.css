@@ -348,3 +348,17 @@ button { font-family: var(--body); cursor: pointer; -webkit-tap-highlight-color:
 .intro-sample figcaption { font-family: var(--display); font-size: 15px; color: var(--ink); text-align: center; line-height: 1.7; }
 /* お手本を出すぶん、最初の画面のお題の看板を少し小さくする */
 #app[data-screen^="intro"] .board b { font-size: clamp(24px, min(11vw, calc(110vw / var(--len, 4))), min(70px, calc(700px / var(--len, 4)))); }
+
+/* 100点の演出（全画面） */
+.jackpot { position: fixed; inset: 0; z-index: 40; background: rgba(8, 10, 34, .93); animation: jackpot-in .8s both; overflow: hidden; }
+.jackpot canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.jackpot-title, .jackpot-sub { position: absolute; left: 0; right: 0; margin: 0; text-align: center; font-family: var(--display); opacity: 0; pointer-events: none; }
+.jackpot-title { bottom: 15%; font-size: clamp(64px, 20vw, 150px); line-height: 1; color: #ffc928; -webkit-text-stroke: 6px var(--ink); paint-order: stroke fill; text-shadow: 0 8px 0 var(--ink); }
+.jackpot-sub { bottom: 8%; font-size: clamp(18px, 5vw, 34px); color: #fff; text-shadow: 0 3px 0 var(--ink); }
+.jackpot.show-title .jackpot-title { animation: jackpot-pop .7s cubic-bezier(.2, 1.6, .4, 1) both; }
+.jackpot.show-title .jackpot-sub { animation: jackpot-pop .7s .35s cubic-bezier(.2, 1.6, .4, 1) both; }
+.jackpot.leaving { animation: jackpot-out .7s both; }
+.jackpot-skip { position: absolute; top: 14px; right: 14px; z-index: 1; }
+@keyframes jackpot-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes jackpot-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes jackpot-pop { from { opacity: 0; scale: .2; } to { opacity: 1; scale: 1; } }

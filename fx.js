@@ -52,6 +52,24 @@ const SOUNDS = {
     [1047, 784, 659].forEach((f) => tone(f, 0.32, 0.55, 'square', 0.05));
     tone(1319, 0.5, 0.4, 'triangle', 0.08);
   },
+  // 花火（90点以上）：ドンという低い音と、パチパチという高い音を5発
+  fireworks: () => {
+    for (let i = 0; i < 5; i++) {
+      const t = i * 0.55;
+      tone(700, t, 0.3, 'triangle', 0.04, 1500); // 上がる音
+      tone(110, t + 0.3, 0.4, 'sine', 0.16, 45); // ドン
+      for (let j = 0; j < 7; j++) tone(1400 + ((i * 7 + j) * 173) % 1500, t + 0.36 + j * 0.05, 0.07, 'triangle', 0.035);
+    }
+  },
+  // 100点の演出：だんだん上がる音 → 長いファンファーレ（約6秒）
+  jackpot: () => {
+    for (let i = 0; i < 16; i++) tone(262 * Math.pow(2, i / 12), i * 0.09, 0.1, 'square', 0.05);
+    const melody = [523, 523, 659, 784, 1047, 784, 1047, 1319];
+    melody.forEach((f, i) => { tone(f, 1.6 + i * 0.22, 0.2, 'square', 0.07); tone(f / 2, 1.6 + i * 0.22, 0.2, 'triangle', 0.06); });
+    [1047, 1319, 1568, 2093].forEach((f) => tone(f, 3.5, 1.6, 'square', 0.045));
+    [523, 659, 784].forEach((f) => tone(f, 3.5, 1.8, 'triangle', 0.06));
+    for (let i = 0; i < 10; i++) tone(1568 + (i % 4) * 262, 4.2 + i * 0.12, 0.1, 'triangle', 0.04);
+  },
   error: () => { tone(220, 0, 0.12, 'sawtooth', 0.06); tone(180, 0.12, 0.18, 'sawtooth', 0.06); },
 };
 
@@ -111,6 +129,149 @@ export function confetti() {
   }
   requestAnimationFrame(frame);
   setTimeout(() => cv.remove(), 5000); // 画面が裏にあってアニメが止まっても、必ず消す
+}
+
+// ---------- 花火（90点以上のとき） ----------
+// 画面の下から玉が上がって、開く。4秒ほどで終わる
+export function fireworks(ms = 4200) {
+  if (reduceMotion()) return;
+  const cv = document.createElement('canvas');
+  cv.className = 'confetti fx-layer';
+  cv.width = window.innerWidth;
+  cv.height = window.innerHeight;
+  document.body.append(cv);
+  const ctx = cv.getContext('2d');
+  const shells = [], sparks = [];
+  const start = performance.now();
+  let last = start, launched = 0;
+  const total = Math.max(5, Math.round(ms / 520));
+  function launch() {
+    const x = cv.width * (0.15 + Math.random() * 0.7);
+    shells.push({ x, y: cv.height + 10, vy: -(cv.height * (0.011 + Math.random() * 0.005)), top: cv.height * (0.15 + Math.random() * 0.3), color: CONFETTI_COLORS[launched % CONFETTI_COLORS.length] });
+    launched++;
+  }
+  function burst(sh) {
+    const n = 70, power = Math.min(cv.width, cv.height) * 0.011;
+    for (let i = 0; i < n; i++) {
+      const a = (Math.PI * 2 * i) / n + Math.random() * 0.1, v = power * (0.45 + Math.random() * 0.65);
+      sparks.push({ x: sh.x, y: sh.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, color: i % 3 === 0 ? '#ffffff' : sh.color });
+    }
+  }
+  function frame(now) {
+    const dt = Math.min(40, now - last) / 16.7;
+    last = now;
+    const t = now - start;
+    while (launched < total && t > launched * (ms * 0.6 / total)) launch();
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    for (const sh of shells) {
+      if (sh.done) continue;
+      sh.y += sh.vy * dt;
+      ctx.fillStyle = sh.color;
+      ctx.beginPath();
+      ctx.arc(sh.x, sh.y, 4, 0, 7);
+      ctx.fill();
+      if (sh.y <= sh.top) { sh.done = true; burst(sh); }
+    }
+    for (const p of sparks) {
+      if (p.life <= 0) continue;
+      p.vx *= 0.975; p.vy = p.vy * 0.975 + 0.09 * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.life -= 0.013 * dt;
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2.2 + p.life * 2.2, 0, 7);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    if (t < ms + 1600 && cv.isConnected) requestAnimationFrame(frame);
+    else cv.remove();
+  }
+  requestAnimationFrame(frame);
+  setTimeout(() => cv.remove(), ms + 3000); // 画面が裏にあってアニメが止まっても、必ず消す
+}
+
+// ---------- 100点の演出（全画面、約7秒） ----------
+// 画面が暗くなる → 虹色の光がゆっくり回る → できた絵が回りながら大きくなる → 「100点」の文字。
+// 強い点滅は使わない（光はゆっくり動かすだけ）。スキップできる。終わったら onEnd を呼ぶ
+export function jackpot(picture, onEnd) {
+  const calm = reduceMotion();
+  const total = calm ? 3000 : 7200;
+  const box = document.createElement('div');
+  box.className = 'jackpot fx-layer';
+  const cv = document.createElement('canvas');
+  const title = document.createElement('p');
+  title.className = 'jackpot-title';
+  title.textContent = '100点';
+  const sub = document.createElement('p');
+  sub.className = 'jackpot-sub';
+  sub.textContent = 'パーフェクト！ 見本そっくり！';
+  const skip = document.createElement('button');
+  skip.className = 'btn ghost jackpot-skip';
+  skip.type = 'button';
+  skip.textContent = 'スキップ';
+  box.append(cv, title, sub, skip);
+  document.body.append(box);
+  const ctx = cv.getContext('2d');
+  cv.width = window.innerWidth;
+  cv.height = window.innerHeight;
+  let ended = false;
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    const wasShown = box.isConnected;
+    box.remove();
+    if (wasShown && onEnd) { try { onEnd(); } catch (e) { /* 演出が失敗しても続ける */ } }
+  };
+  skip.addEventListener('click', end);
+  const start = performance.now();
+  const ease = (x) => 1 - Math.pow(1 - Math.max(0, Math.min(1, x)), 3);
+  function frame(now) {
+    if (ended) return;
+    if (!box.isConnected) { ended = true; return; } // ほかの画面へ行って、消された
+    const t = now - start, W = cv.width, H = cv.height, cx = W / 2, cy = H * 0.42;
+    ctx.clearRect(0, 0, W, H);
+    // 虹色の光（12本）。ゆっくり回る
+    if (!calm) {
+      const rays = 12, R = Math.hypot(W, H), spin = t / 5200, show = ease((t - 600) / 1200) * 0.5;
+      for (let i = 0; i < rays; i++) {
+        const a0 = spin + (Math.PI * 2 * i) / rays, a1 = a0 + Math.PI / rays;
+        ctx.fillStyle = `hsla(${(i * 30 + t / 40) % 360}, 95%, 60%, ${show})`;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, R, a0, a1);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    // できた絵：回りながら大きくなる（3回転して止まる）
+    const k = calm ? 1 : ease((t - 1100) / 2600);
+    if (k > 0 && picture) {
+      const side = Math.min(W * 0.78, H * 0.46), ratio = picture.width / picture.height;
+      const pw = ratio >= 1 ? side : side * ratio, ph = ratio >= 1 ? side / ratio : side;
+      ctx.save();
+      ctx.translate(cx, cy + (calm ? 0 : Math.sin(t / 420) * 6 * k));
+      ctx.rotate((1 - k) * Math.PI * 6);
+      ctx.scale(0.08 + 0.92 * k, 0.08 + 0.92 * k);
+      ctx.fillStyle = '#ffc928';
+      ctx.fillRect(-pw / 2 - 12, -ph / 2 - 12, pw + 24, ph + 24);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+      ctx.drawImage(picture, -pw / 2, -ph / 2, pw, ph);
+      ctx.restore();
+    }
+    if (t > (calm ? 200 : 3400)) box.classList.add('show-title');
+    if (t > total - 700) box.classList.add('leaving');
+    if (t >= total) { end(); return; }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  setTimeout(end, total + 2500); // 画面が裏にあってアニメが止まっても、必ず終わる
+}
+
+// 出ている演出（花火、100点の演出）を全部消す。ほかの画面へ行くときに呼ぶ
+export function stopFx() {
+  document.querySelectorAll('.fx-layer').forEach((el) => el.remove());
 }
 
 // ---------- 背景：らくがきがゆっくり流れる ----------

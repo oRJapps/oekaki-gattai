@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261117090338';
-import { loadSample, loadAlternates } from './samples.js?v=20261117090338';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261117090338';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261117090338';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261117090338';
-import { makeCard } from './card.js?v=20261117090338';
-import * as net from './net.js?v=20261117090338';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261117091519';
+import { loadSample, loadAlternates } from './samples.js?v=20261117091519';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261117091519';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261117091519';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261117091519';
+import { makeCard } from './card.js?v=20261117091519';
+import * as net from './net.js?v=20261117091519';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -856,7 +856,9 @@ function checkAllParts() {
 // 点数（そっくり度）にそえるひとこと
 const BEST_KEY = 'oekaki_best_similarity';
 function rankWord(score) {
-  if (score >= 85) return '見本そっくり！';
+  if (score >= 100) return 'パーフェクト！！';
+  if (score >= 90) return '見本そっくり！！';
+  if (score >= 80) return 'かなりそっくり！';
   if (score >= 65) return 'かなり似てる！';
   if (score >= 45) return 'おしい！';
   if (score >= 25) return 'ふんいきは出てる！';
@@ -947,7 +949,7 @@ function revealScreen() {
     const count = setInterval(() => {
       const t = Math.min(1, (Date.now() - began) / 900);
       scoreNum.textContent = String(Math.round(finalScore * t));
-      if (t >= 1) clearInterval(count);
+      if (t >= 1) { clearInterval(count); celebrate(); }
     }, 30);
     G.timers.push(count);
     rank.textContent = sampleReady ? rankWord(finalScore) : '';
@@ -961,6 +963,18 @@ function revealScreen() {
       scoreNote.textContent = joint + `自己ベスト：${best}点`;
     }
     makeBlob().then((blob) => { cardBlob = blob; }).catch(() => {});
+  };
+  // 特別な演出：90点以上は花火と効果音。100点は全画面の演出（終わったら花火）。点数を数え終わってから出す
+  // 確認用：アドレスに ?fx=90 や ?fx=100 をつけると、点数に関係なく演出だけを出せる（点数と記録は変わらない）
+  let celebrated = false;
+  const celebrate = () => {
+    if (celebrated || G.round !== r || G.phase !== 'reveal' || !G.reveal) return;
+    celebrated = true;
+    const forced = parseInt(new URLSearchParams(location.search).get('fx'), 10);
+    const level = Number.isFinite(forced) ? forced : (sampleReady ? finalScore : 0);
+    const boom = () => { if (G.round === r && G.phase === 'reveal') { sfx('fireworks'); fireworks(); } };
+    if (level >= 100) { sfx('jackpot'); jackpot(G.reveal.toCanvas(), boom); }
+    else if (level >= 90) boom();
   };
   const begin = () => {
     if (G.round !== r || G.phase !== 'reveal') return; // 読みこみの間に、ほかの画面へ行っていた
@@ -1052,7 +1066,7 @@ function revealScreen() {
   }
 }
 
-function stopReveal() { if (G.reveal) { G.reveal.stop(); G.reveal = null; } }
+function stopReveal() { stopFx(); if (G.reveal) { G.reveal.stop(); G.reveal = null; } }
 
 // 受け取った絵（線とぬりつぶし）を確かめる。形がおかしいものは捨てる
 function cleanOps(ops) {
