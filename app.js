@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261117091519';
-import { loadSample, loadAlternates } from './samples.js?v=20261117091519';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261117091519';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261117091519';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261117091519';
-import { makeCard } from './card.js?v=20261117091519';
-import * as net from './net.js?v=20261117091519';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261117173213';
+import { loadSample, loadAlternates } from './samples.js?v=20261117173213';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261117173213';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261117173213';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261117173213';
+import { makeCard } from './card.js?v=20261117173213';
+import * as net from './net.js?v=20261117173213';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -497,13 +497,38 @@ function hostCheck() {
   }
 }
 
+// 前のラウンドの分け方と、だれがどのパートだったか（同じ人に、同じ場所ばかり当たらないようにするため）
+const LAST = { layout: '', parts: {}, soloPart: -1 };
+
+// 分け方をえらぶ：前と同じ分け方は、なるべくさける（3人以上は、お題の形で決まるので変わらない）
+function freshLayout(level, count, wide) {
+  let layout = pickLayout(level, count, wide);
+  for (let i = 0; i < 12 && layout === LAST.layout; i++) layout = pickLayout(level, count, wide);
+  return layout;
+}
+
+// パートをバラバラに当てる：順番をまぜる。前のラウンドと同じ番号のパートになる人が、いなくなるまでまぜ直す
+function shuffleParts(players) {
+  let best = players.slice(), bestSame = Infinity;
+  for (let t = 0; t < 40 && bestSame > 0; t++) {
+    const list = players.slice();
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [list[i], list[j]] = [list[j], list[i]];
+    }
+    const same = list.filter((p, i) => LAST.parts[p.id] === i).length;
+    if (same < bestSame) { best = list; bestSame = same; }
+  }
+  return best;
+}
+
 function startRound() {
   G.starting = true;
-  const ps = G.players;
+  const ps = shuffleParts(G.players);
   const topic = nextTopic(G.room.difficulty, G.roomTopics); // まだ出ていないお題からえらぶ
   sendSigned('start', {
     id: crypto.randomUUID(), topic, count: ps.length, seconds: DRAW_SECONDS,
-    layout: pickLayout(G.room.difficulty, ps.length, WIDE_TOPICS.has(parseTopic(topic).base)),
+    layout: freshLayout(G.room.difficulty, ps.length, WIDE_TOPICS.has(parseTopic(topic).base)),
     order: ps.map((p) => ({ id: p.id, name: p.name })),
   });
   net.api.updateRoom(G.room, { status: 'playing', player_count: ps.length });
@@ -558,6 +583,9 @@ function handleStart(d, from) {
   if (swap) log(`start collision: switch ${cur.id} -> ${d.id}`);
   G.seenRounds.add(d.id);
   G.roomTopics.add(parseTopic(d.topic).base); // この部屋で出たお題。次からは出さない
+  // 今回の分け方と、だれがどのパートかをおぼえる（次のラウンドで、同じ場所ばかりにならないようにする）
+  LAST.layout = d.layout;
+  LAST.parts = Object.fromEntries(d.order.map((o, i) => [o.id, i]));
   const index = d.order.findIndex((o) => o.id === me.id);
   // 自分が入っていない、または自分が「準備OK」を押していないラウンドには参加しない
   if (index < 0 || (!G.ready && !swap)) {
@@ -667,9 +695,12 @@ function silhouette(cv) {
 function startSolo() {
   const topic = nextTopic(G.level);
   markTopic(topic);
-  const myPart = Math.random() < 0.5 ? 0 : 1;
+  // 分け方は前とちがうものに。パートは、前と反対がわを多めに（4回に3回）して、同じ場所ばかりにならないようにする
+  const layout = freshLayout(G.level, 2, WIDE_TOPICS.has(parseTopic(topic).base));
+  const myPart = LAST.soloPart < 0 ? (Math.random() < 0.5 ? 0 : 1) : (Math.random() < 0.75 ? 1 - LAST.soloPart : LAST.soloPart);
+  LAST.layout = layout; LAST.soloPart = myPart;
   beginRound({
-    id: crypto.randomUUID(), topic, count: 2, layout: pickLayout(G.level, 2, WIDE_TOPICS.has(parseTopic(topic).base)), seconds: DRAW_SECONDS, solo: true, myPart,
+    id: crypto.randomUUID(), topic, count: 2, layout, seconds: DRAW_SECONDS, solo: true, myPart,
     owners: myPart === 0 ? [me.name, 'CPU'] : ['CPU', me.name],
   });
 }
