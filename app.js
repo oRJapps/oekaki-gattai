@@ -5,19 +5,20 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261116224723';
-import { loadSample, loadAlternates } from './samples.js?v=20261116224723';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261116224723';
-import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261116224723';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261116224723';
-import { makeCard } from './card.js?v=20261116224723';
-import * as net from './net.js?v=20261116224723';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261117090338';
+import { loadSample, loadAlternates } from './samples.js?v=20261117090338';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261117090338';
+import { sfx, confetti, startBackdrop, isMuted, setMuted } from './fx.js?v=20261117090338';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261117090338';
+import { makeCard } from './card.js?v=20261117090338';
+import * as net from './net.js?v=20261117090338';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
 // 描く時間は180秒。確認用に ?sec=10 のように短くできる
 const DRAW_SECONDS = Math.max(5, parseInt(params.get('sec'), 10) || 180);
-const INTRO_MS = 5000; // お題とお手本を見せる時間。この間だけお手本が見える
+const INTRO_MS = 4000; // お題と、自分が描くパートを見せる時間
+const SAMPLE_MS = 2000; // お手本（シルエット）を見せる時間。最初のこの間だけ見える
 const SITE_URL = 'https://orjapps.github.io/oekaki-gattai/'; // シェアするときに入れる公開先
 // スマホかタブレットなら true（iPad は Mac と名のるので、タッチできるかどうかも見る）
 const IS_PHONE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
@@ -637,6 +638,30 @@ function renderLobby() {
   );
 }
 
+// 絵をシルエット（黒い影）にする：外がわから白をたどって、とどかない所を全部ぬりつぶす（白いごはんのような、絵の中の白もぬる）
+function silhouette(cv) {
+  const w = cv.width, hh = cv.height, c = cv.getContext('2d'), img = c.getImageData(0, 0, w, hh), d = img.data;
+  const white = (i) => d[i * 4 + 3] < 40 || (d[i * 4] > 240 && d[i * 4 + 1] > 240 && d[i * 4 + 2] > 240);
+  const outside = new Uint8Array(w * hh), stack = [];
+  for (let x = 0; x < w; x++) stack.push(x, (hh - 1) * w + x);
+  for (let y = 0; y < hh; y++) stack.push(y * w, y * w + w - 1);
+  while (stack.length) {
+    const i = stack.pop();
+    if (outside[i] || !white(i)) continue;
+    outside[i] = 1;
+    const x = i % w;
+    if (x > 0) stack.push(i - 1);
+    if (x < w - 1) stack.push(i + 1);
+    if (i >= w) stack.push(i - w);
+    if (i < w * hh - w) stack.push(i + w);
+  }
+  for (let i = 0; i < w * hh; i++) {
+    const k = i * 4;
+    if (outside[i]) { d[k] = d[k + 1] = d[k + 2] = 255; d[k + 3] = 255; } else { d[k] = 26; d[k + 1] = 31; d[k + 2] = 60; d[k + 3] = 255; }
+  }
+  c.putImageData(img, 0, 0);
+}
+
 // ---------- シングル（CPUと合体） ----------
 // 2つのパートのうち、片方だけを描く。もう片方は CPU が自動で描く（見本の絵の、そのパートの部分）
 function startSolo() {
@@ -671,14 +696,16 @@ function introScreen() {
   track();
   const preview = h('canvas', { class: 'preview', id: 'preview' });
   drawLayoutPreview(preview, G.layout, r.myPart);
-  // お手本：最初の5秒だけ見せる（描く画面にうつると消える）。組み合わせお題では、ことばに合った飾りつきの絵
+  // お手本：最初の2秒だけ、シルエット（黒い影）で見せる。組み合わせお題では、ことばに合った飾りつきの絵
   const parsed = parseTopic(r.topic) || { base: r.topic, mod: '' };
   const modelCv = h('canvas', { width: 10, height: 10 });
-  const model = h('figure', { class: 'intro-sample', id: 'intro-sample', hidden: true }, modelCv, h('figcaption', {}, 'おてほん（5秒で消えます）'));
+  const model = h('figure', { class: 'intro-sample', id: 'intro-sample', hidden: true }, modelCv, h('figcaption', {}, 'おてほん（2秒で消えます）'));
   loadSample(parsed.base, sampleFile(parsed.base), sampleFlip(parsed.base), parsed.mod, topicDir(parsed.base) === '左向き').then((ops) => {
     if (!ops || G.round !== r || G.phase !== 'intro') return;
     drawSample(modelCv, ops, 360);
+    silhouette(modelCv);
     model.hidden = false;
+    later(() => { model.style.visibility = 'hidden'; }, SAMPLE_MS); // 場所はあけたままにする（画面がガタッと動かないように）
   });
   sfx('topic');
   show('intro-' + r.myPart,
@@ -690,7 +717,7 @@ function introScreen() {
         h('p', { class: 'note', id: 'layout-name' }, `分け方：${LAYOUT_NAMES[G.layout.id]}（${r.count}つに分ける）`))),
     h('div', { class: 'fuse', 'aria-hidden': 'true' }, h('i', { style: `animation-duration:${INTRO_MS}ms` })),
     h('p', { class: 'note' }, r.solo ? 'もう片方は、CPUが描きます（合体まで見えません）' : 'ほかのパートは、合体まで見えません'),
-    h('p', { class: 'note tip' }, 'お手本をよく見ておぼえよう。金色の点線まで線をのばすと、となりの絵とつながります'),
+    h('p', { class: 'note tip' }, 'お手本の形をよく見ておぼえよう。金色の点線まで線をのばすと、となりの絵とつながります'),
   );
   later(drawScreen, INTRO_MS);
 }
