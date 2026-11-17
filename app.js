@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261117174602';
-import { loadSample, loadAlternates } from './samples.js?v=20261117174602';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture } from './draw.js?v=20261117174602';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261117174602';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261117174602';
-import { makeCard } from './card.js?v=20261117174602';
-import * as net from './net.js?v=20261117174602';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261117182058';
+import { loadSample, loadAlternates } from './samples.js?v=20261117182058';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers } from './draw.js?v=20261117182058';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261117182058';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261117182058';
+import { makeCard } from './card.js?v=20261117182058';
+import * as net from './net.js?v=20261117182058';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -720,6 +720,11 @@ function beginRound(round) {
   clearInterval(G.resend);
   G.round = round;
   G.layout = makeLayout(round.layout, round.count);
+  // 見本を読みこんで、パートごとの範囲を出しておく（描く画面で「描ける範囲」として使う）
+  const topicParts = parseTopic(round.topic) || { base: round.topic, mod: '' };
+  const layoutNow = G.layout;
+  round.targets = loadSample(topicParts.base, sampleFile(topicParts.base), sampleFlip(topicParts.base), topicParts.mod, topicDir(topicParts.base) === '左向き')
+    .then((ops) => (ops ? samplePartLayers(layoutNow, ops) : null)).catch(() => null);
   G.parts = {};
   G.done = new Set();
   G.submitted = false;
@@ -782,6 +787,11 @@ function drawScreen() {
     next: r.myPart < r.count - 1 ? `「${regs[r.myPart + 1].label}」の絵とつながる線` : '',
   });
   G.pad = pad;
+  // 描ける範囲：見本の絵がある範囲（少し余白つき）だけに描ける。全員が同じ大きさ・位置で描けるようにする
+  r.targets.then((t) => {
+    const mine = t && t[r.myPart];
+    if (G.round === r && G.pad === pad && mine && mine.box) pad.setLimit(mine.box);
+  });
 
   function mark(el, group) {
     el.closest('.tools').querySelectorAll(group).forEach((x) => { x.classList.remove('on'); x.setAttribute('aria-pressed', 'false'); });
@@ -833,7 +843,7 @@ function drawScreen() {
       h('div', { class: 'toolrow' }, widthButtons,
         h('button', { class: 'tool', onclick: () => pad.undo() }, icon('undo'), '1つもどす'),
         h('button', { class: 'tool', onclick: () => pad.clear() }, icon('trash'), '全部消す'))),
-    h('p', { class: 'note', id: 'wait-text', role: 'status' }, '金色の点線が、となりの絵とのつなぎめ。線を点線までのばそう'),
+    h('p', { class: 'note', id: 'wait-text', role: 'status' }, '明るい四角の中に描こう。金色の点線が、となりの絵とのつなぎめ。線を点線までのばそう'),
     h('button', { class: 'btn primary go', id: 'done-btn', onclick: submitPart }, icon('check'), 'できた！'),
   );
   tick();
@@ -935,9 +945,11 @@ function revealScreen() {
   let scoreLabel = 'そっくり度', sampleOpsAll = null;
   const isLeft = topicDir(base) === '左向き';
   let alternates = []; // 見本のほかに「これでも正解」とする絵（リボンを首につけた絵、飾りなしの絵）
+  let targets = null; // 見本の、パートごとの絵と範囲（合体で大きさを合わせる先。点数もパートごとにくらべる）
   const sampleLoaded = loadSample(base, sampleFile(base), sampleFlip(base), parsed.mod, isLeft).then(async (ops) => {
     if (ops) { drawSample(sampleCv, ops, 300); sampleReady = true; sampleOpsAll = ops; }
     if (ops && parsed.mod) alternates = await loadAlternates(base, sampleFile(base), sampleFlip(base), parsed.mod, isLeft);
+    if (ops) targets = samplePartLayers(G.layout, ops); // 見本の、パートごとの絵と範囲
     return ops;
   });
   // 押すと大きくなる（もう一度押すと小さくなる）
@@ -965,15 +977,23 @@ function revealScreen() {
     // シングル：自分が描いたパートだけを、見本の同じパートとくらべる（CPU のパートは見本そのものなので、点数に入れない）
     // 組み合わせお題：飾りの場所は人によってちがう（リボンは耳にも首にも尻尾にもつける）ので、
     // 「これでも正解」の絵ともくらべて、いちばん高い点数を使う
-    if (sampleReady) {
+    // 点数はパートごとにつける：各パートを、見本の同じパートとくらべて、平均する（見本の絵が多いパートほど重く数える）。
+    // 1人の絵がずれていても、ほかの人の点数まで大きく下がらないようにするため
+    if (sampleReady && targets) {
       const refs = [{ ops: sampleOpsAll, weight: 1 }, ...alternates];
-      const mine = r.solo ? partPicture(G.layout, r.myPart, parts[r.myPart]) : G.reveal.toCanvas();
+      const mine = G.reveal.partCanvases();
+      const which = r.solo ? [r.myPart] : mine.map((_, i) => i);
       finalScore = Math.max(...refs.map((ref) => {
-        let target;
-        if (r.solo) target = partPicture(G.layout, r.myPart, ref.ops);
-        else if (ref.ops === sampleOpsAll) target = sampleCv;
-        else { target = document.createElement('canvas'); drawSample(target, ref.ops, 300); }
-        return Math.round(similarity(mine, target) * ref.weight);
+        const tg = ref.ops === sampleOpsAll ? targets : samplePartLayers(G.layout, ref.ops);
+        let sum = 0, total = 0;
+        for (const i of which) {
+          const fb = tg[i] && tg[i].fbox;
+          if (!fb) continue; // 見本に絵がないパートは、数えない
+          const weightI = Math.max(1, (fb.u1 - fb.u0) * (fb.v1 - fb.v0));
+          sum += weightI * similarity(mine[i], tg[i].cv);
+          total += weightI;
+        }
+        return total ? Math.round((sum / total) * ref.weight) : 0;
       }));
     }
     else { finalScore = result.score; scoreLabel = 'つながり度'; document.getElementById('score-label').textContent = scoreLabel; }
@@ -1019,6 +1039,7 @@ function revealScreen() {
   const begin = () => {
     if (G.round !== r || G.phase !== 'reveal') return; // 読みこみの間に、ほかの画面へ行っていた
     G.reveal = startReveal(canvas, G.layout, parts, {
+      targets,
       onFit: () => { status.textContent = 'つなげています…'; },
       onDone: (result) => { sampleLoaded.then(() => finish(result), () => finish(result)); },
     });
@@ -1026,7 +1047,7 @@ function revealScreen() {
   if (r.solo) {
     // シングル：CPU のパートは、見本の絵のその部分（パートの範囲の外は、自動で切り取られる）
     sampleLoaded.then((ops) => { parts[1 - r.myPart] = ops || []; begin(); }, begin);
-  } else begin();
+  } else sampleLoaded.then(begin, begin); // 見本を読みこんでから始める（大きさを合わせる先として使う）
 
   // スマホ・タブレット：絵の画像つきで共有する（出てきた一覧から X をえらぶ）
   async function sharePhone() {

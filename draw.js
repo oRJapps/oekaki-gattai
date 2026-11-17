@@ -139,8 +139,12 @@ class Layer {
     this.reg = reg;
     this.cv = newCanvas(reg.bbox.w, reg.bbox.h);
     this.ctx = this.cv.getContext('2d', { willReadFrequently: true });
-    this.mask = null; // ぬりつぶしで「範囲の中かどうか」を見る表（三角の範囲のときだけ使う）
+    this.mask = null; // ぬりつぶしで「範囲の中かどうか」を見る表（三角の範囲のとき、描ける範囲を決めたときに使う）
+    this.limit = null; // 描ける範囲（四角）。{ x, y, w, h }。null = パートの範囲ぜんぶ
   }
+
+  // 描ける範囲を決める（見本の絵がある範囲）。この外には、線もぬりつぶしも入らない
+  setLimit(box) { this.limit = box || null; this.mask = null; }
 
   // 絵の座標で描けるようにして、範囲の外にはみ出さないようにする
   inside(fn) {
@@ -148,6 +152,7 @@ class Layer {
     c.save();
     c.setTransform(1, 0, 0, 1, -b.x, -b.y);
     c.clip(this.reg.path);
+    if (this.limit) { c.beginPath(); c.rect(this.limit.x, this.limit.y, this.limit.w, this.limit.h); c.clip(); }
     fn(c);
     c.restore();
   }
@@ -163,10 +168,11 @@ class Layer {
   }
 
   getMask() {
-    if (this.mask || this.reg.rect) return this.mask;
+    if (this.mask || (this.reg.rect && !this.limit)) return this.mask;
     const cv = newCanvas(this.cv.width, this.cv.height), c = cv.getContext('2d');
     c.setTransform(1, 0, 0, 1, -this.reg.bbox.x, -this.reg.bbox.y);
-    c.fill(this.reg.path);
+    if (this.limit) { c.clip(this.reg.path); c.fillRect(this.limit.x, this.limit.y, this.limit.w, this.limit.h); }
+    else c.fill(this.reg.path);
     const d = c.getImageData(0, 0, cv.width, cv.height).data;
     this.mask = new Uint8Array(cv.width * cv.height);
     for (let i = 0; i < this.mask.length; i++) this.mask[i] = d[i * 4 + 3] > 127 ? 1 : 0;
@@ -280,6 +286,8 @@ export class Pad {
     if (!this.ctx.isPointInPath(this.reg.path, x, y)) return;
     e.preventDefault();
     if (this.tool === 'fill') {
+      const m = this.limit;
+      if (m && (x < m.x || y < m.y || x > m.x + m.w || y > m.y + m.h)) return; // 描ける範囲の外は、ぬれない
       const op = { f: 1, c: this.color, x, y };
       this.ops.push(op);
       this.layer.apply(op);
@@ -304,6 +312,13 @@ export class Pad {
     this.compose();
   }
 
+  // 描ける範囲（四角）を決める。外はうすく暗くなり、描けなくなる
+  setLimit(box) {
+    this.limit = box || null;
+    this.layer.setLimit(this.limit);
+    this.rebuild();
+  }
+
   rebuild() {
     this.layer.clear();
     this.ops.forEach((op) => this.layer.apply(op));
@@ -321,6 +336,23 @@ export class Pad {
     c.fillRect(0, 0, b.w, b.h);
     c.drawImage(this.layer.cv, 0, 0);
     c.setTransform(1, 0, 0, 1, -b.x, -b.y); // ここからは絵の座標で描く
+    // 描ける範囲（四角）の外を、うすく暗くする。四角のふちに、点線を引く
+    if (this.limit) {
+      const m = this.limit;
+      c.save();
+      c.clip(this.reg.path);
+      c.beginPath();
+      c.rect(b.x, b.y, b.w, b.h);
+      c.rect(m.x, m.y, m.w, m.h);
+      c.fillStyle = 'rgba(27, 32, 64, .2)';
+      c.fill('evenodd');
+      c.lineWidth = 4;
+      c.strokeStyle = 'rgba(43, 50, 82, .55)';
+      c.setLineDash([14, 12]);
+      c.strokeRect(m.x, m.y, m.w, m.h);
+      c.setLineDash([]);
+      c.restore();
+    }
     // ほかの人のパートが同じ四角の中にあるとき（ななめ）は、暗くして見えなくする
     L.regions.forEach((r, i) => {
       if (i === this.part) return;
@@ -389,6 +421,84 @@ export function drawSample(canvas, ops, size = 300) {
   c.scale(size / 1000, size / 1000);
   ops.forEach((s) => {
     if (s.g) fillPolygon(c, s); else drawStroke(c, s);
+  });
+}
+
+// ---------- 見本の、パートごとの範囲 ----------
+// 絵がある範囲を、つなぎめに沿った座標（u, v）で測る。絵がなければ null
+function frameBox(layout, img, i) {
+  const f = layout.frame, b = layout.regions[i].bbox;
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+  for (let py = 0; py < img.height; py += 2) {
+    for (let px = 0; px < img.width; px += 2) {
+      if (img.data[(py * img.width + px) * 4 + 3] <= 60) continue;
+      const x = px + b.x - f.ox, y = py + b.y - f.oy;
+      const u = x * f.tx + y * f.ty, v = x * f.nx + y * f.ny;
+      if (u < u0) u0 = u;
+      if (u > u1) u1 = u;
+      if (v < v0) v0 = v;
+      if (v > v1) v1 = v;
+    }
+  }
+  return u1 < u0 ? null : { u0, u1, v0, v1 };
+}
+
+// 見本の絵（1000×1000 の座標）を、分け方に合わせて引きのばし、パートごとに切り分ける。
+// 返す値：パートごとに { cv: そのパートの見本の絵, box: 描ける範囲（四角。少し余白つき）, fbox: 絵がある範囲（u, v） }
+//   box は、描く画面で「ここに描く」と見せる範囲。fbox は、合体のときに各自の絵を合わせる先
+export function samplePartLayers(layout, ops) {
+  const sx = layout.w / 1000, sy = layout.h / 1000, sw = Math.sqrt(sx * sy);
+  const scaled = (ops || []).map((s) => ({ ...s, w: s.w ? s.w * sw : s.w, p: s.p.map((val, k) => val * (k % 2 ? sy : sx)) }));
+  return layout.regions.map((reg, i) => {
+    const layer = new Layer(reg);
+    scaled.forEach((op) => layer.apply(op));
+    const img = layer.ctx.getImageData(0, 0, layer.cv.width, layer.cv.height), rb = reg.bbox;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let py = 0; py < img.height; py += 2) {
+      for (let px = 0; px < img.width; px += 2) {
+        if (img.data[(py * img.width + px) * 4 + 3] <= 60) continue;
+        if (px < x0) x0 = px;
+        if (px > x1) x1 = px;
+        if (py < y0) y0 = py;
+        if (py > y1) y1 = py;
+      }
+    }
+    if (x1 < x0) return { cv: layer.cv, box: null, fbox: null };
+    // 余白：四角の大きいほうの辺の8%（24ドット以上）。パートのふちに近いとき（30ドット以内）は、ふちまで広げる
+    const m = Math.max(24, 0.08 * Math.max(x1 - x0, y1 - y0));
+    let bx0 = x0 - m, by0 = y0 - m, bx1 = x1 + m, by1 = y1 + m;
+    if (bx0 < 30) bx0 = 0;
+    if (by0 < 30) by0 = 0;
+    if (bx1 > rb.w - 30) bx1 = rb.w;
+    if (by1 > rb.h - 30) by1 = rb.h;
+    const box = { x: rb.x + Math.round(bx0), y: rb.y + Math.round(by0), w: Math.round(bx1 - bx0), h: Math.round(by1 - by0) };
+    return { cv: layer.cv, box, fbox: frameBox(layout, img, i) };
+  });
+}
+
+// 各自の絵を、見本の同じパートの範囲に合わせる方法を決める（大きく描いた人も、小さく描いた人も、同じ大きさと位置にそろえる）。
+// 返す値：パートごとに { su, sv, uA, uT, vA, vT }（u' = uT + su(u - uA)、v' = vT + sv(v - vA)）。動かさないパートは null
+function registration(layout, layers, targets) {
+  const n = layout.count;
+  return layers.map((l, i) => {
+    const T = targets && targets[i] && targets[i].fbox;
+    if (!T) return null;
+    const A = frameBox(layout, l.ctx.getImageData(0, 0, l.cv.width, l.cv.height), i);
+    if (!A) return null;
+    const Au = A.u1 - A.u0, Av = A.v1 - A.v0, Tu = T.u1 - T.u0, Tv = T.v1 - T.v0;
+    if (Au < 30 || Av < 30 || Tu < 30 || Tv < 30) return null;
+    // 基本は、たても横も同じ倍率（0.8〜2.5倍）。足りない向きだけ、さらに3割まで伸ばす
+    const s = clamp(Math.min(Tu / Au, Tv / Av), 0.8, 2.5);
+    const su = clamp(Tu / Au, s, s * 1.3);
+    let sv = clamp(Tv / Av, s, s * 1.3);
+    const uA = (A.u0 + A.u1) / 2, uT = (T.u0 + T.u1) / 2;
+    let vA, vT;
+    if (n < 2) { vA = (A.v0 + A.v1) / 2; vT = (T.v0 + T.v1) / 2; }
+    else if (i === 0) { vA = A.v1; vT = T.v1; } // 最初のパート：つなぎめがわのはしを合わせる
+    else if (i === n - 1) { vA = A.v0; vT = T.v0; } // 最後のパート：つなぎめがわのはしを合わせる
+    else { sv = clamp(Tv / Av, 0.7, 2.5); vA = (A.v0 + A.v1) / 2; vT = (T.v0 + T.v1) / 2; } // まんなか：両がわのつなぎめに届くように
+    if (Math.abs(su - 1) < 0.03 && Math.abs(sv - 1) < 0.03 && Math.abs(uT - uA) < 4 && Math.abs(vT - vA) < 4) return null;
+    return { su, sv, uA, uT, vA, vT };
   });
 }
 
@@ -553,7 +663,8 @@ function marks(layout, data, i, cut, side) {
 }
 
 // つなぎめごとに、どれだけうまくつながっているかを調べて、合わせ方（拡大・縮小とずらし）と点数を決める
-function analyze(layout, layers) {
+// tight：先に見本の範囲へ合わせてあるとき。つなぎめ合わせの拡大・縮小を、ひかえめにする（1.25倍まで、0.85倍まで）
+function analyze(layout, layers, tight = false) {
   const data = layers.map((l) => l.ctx.getImageData(0, 0, l.cv.width, l.cv.height));
   const n = layout.count;
   // fit[i] = { lo, hi }：パート i の、手前のつなぎめ（lo）と向こうのつなぎめ（hi）での合わせ方
@@ -573,8 +684,8 @@ function analyze(layout, layers) {
     const Q = A.n && B.n ? (A.len >= B.len ? A.c : B.c) : null;
     if (A.n && B.n && A.len >= 40 && B.len >= 40) {
       const L = Math.max(A.len, B.len);
-      sA = clamp(L / A.len, 1, 2);
-      sB = clamp(L / B.len, 1, 2);
+      sA = clamp(L / A.len, 1, tight ? 1.25 : 2);
+      sB = clamp(L / B.len, 1, tight ? 1.25 : 2);
     }
     if (Q !== null) {
       fit[k].hi = { s: sA, P: A.c, Q, cut, gap: gaps[k] };
@@ -607,7 +718,7 @@ function analyze(layout, layers) {
     const lenA = j.A.len * fa.s, lenB = j.B.len * fb.s;
     const [big, bigIdx, ratio] = lenA > lenB ? [fa, k, lenB / lenA] : [fb, k + 1, lenA / lenB];
     if (ratio > 0.97) return;
-    big.s = Math.max(0.7, big.s * ratio); // 小さくしすぎると、頭だけ小さい絵になるので、7割まで
+    big.s = Math.max(tight ? 0.85 : 0.7, big.s * ratio); // 小さくしすぎると、頭だけ小さい絵になるので、7割まで
     const ft = fit[bigIdx];
     if (!ft.lo || !ft.hi) ft.sv = big.s; // はしのパート：たても横も同じ倍率で小さくする（形をゆがめない）
   });
@@ -662,13 +773,16 @@ function analyze(layout, layers) {
 
 // ---------- 合体 ----------
 // 1. 全員の絵を少しずつ描く → 2. つなぎめが合うように、それぞれの絵を拡大・縮小してずらす → 3. 点数を出す
-// hooks：{ onFit(), onDone(result) }。result = { score, scores }
+// hooks：{ onFit(), onDone(result), targets }。result = { score, scores }
+//   targets：見本のパートごとの範囲（samplePartLayers の返す値）。あれば、先に各自の絵を見本の範囲に合わせてから、つなぎめを合わせる
 export function startReveal(canvas, layout, partsOps, hooks = {}) {
   canvas.width = layout.w;
   canvas.height = layout.h;
   canvas.style.setProperty('--ratio', String(layout.w / layout.h));
   const ctx = canvas.getContext('2d');
-  const layers = layout.regions.map((r) => new Layer(r));
+  let layers = layout.regions.map((r) => new Layer(r));
+  const targets = hooks.targets || null;
+  if (targets) layers.forEach((l, i) => { if (targets[i] && targets[i].box) l.setLimit(targets[i].box); }); // 描いたときと同じ「描ける範囲」にする（ぬりつぶしが同じ結果になるように）
   const tasks = [];
   partsOps.forEach((ops, pi) => (ops || []).forEach((op) => {
     if (op.f || op.g) tasks.push([pi, op, -1]);
@@ -680,13 +794,65 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
 
   // 絵の座標での変形を、キャンバスにセットする。u' = Q + a(u - P)、v' = C + b(v - C)
   // Ct：C の行き先（すきまをつめるとき、つなぎめのほうへ動かす）
-  function setWarp(a, b, Q, P, C, Ct = C) {
+  function warpMatrix(a, b, Q, P, C, Ct = C) {
     const m11 = f.tx * a * f.tx + f.nx * b * f.nx, m12 = f.tx * a * f.ty + f.nx * b * f.ny;
     const m21 = f.ty * a * f.tx + f.ny * b * f.nx, m22 = f.ty * a * f.ty + f.ny * b * f.ny;
     const du = Q - a * P, dv = Ct - b * C;
     const ex = f.ox + f.tx * du + f.nx * dv - (m11 * f.ox + m12 * f.oy);
     const ey = f.oy + f.ty * du + f.ny * dv - (m21 * f.ox + m22 * f.oy);
-    ctx.setTransform(m11, m21, m12, m22, ex, ey);
+    return [m11, m21, m12, m22, ex, ey];
+  }
+  function setWarp(a, b, Q, P, C, Ct = C) { ctx.setTransform(...warpMatrix(a, b, Q, P, C, Ct)); }
+
+  // つなぎめの点線
+  function drawDividers() {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setLineDash([14, 14]);
+    ctx.strokeStyle = 'rgba(0,0,0,.2)';
+    ctx.lineWidth = 3;
+    layout.cuts.forEach((cut) => {
+      const [x1, y1] = toWorld(f, 0, cut), [x2, y2] = toWorld(f, layout.edgeLen, cut);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  // 第1段階：各自の絵を、見本の同じパートの範囲に合わせる。t = 0：描いたまま、t = 1：合わせた形
+  let regs = null;
+  function composeReg(t) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, layout.w, layout.h);
+    layers.forEach((layer, i) => {
+      const b = layer.reg.bbox, g = regs && regs[i];
+      if (!g) { ctx.drawImage(layer.cv, b.x, b.y); return; }
+      ctx.save();
+      ctx.clip(layer.reg.path);
+      setWarp(1 + (g.su - 1) * t, 1 + (g.sv - 1) * t, g.uA + (g.uT - g.uA) * t, g.uA, g.vA, g.vA + (g.vT - g.vA) * t);
+      ctx.drawImage(layer.cv, b.x, b.y);
+      ctx.restore();
+    });
+    drawDividers();
+  }
+  // 第1段階の結果を、新しい紙（レイヤー）に写す。このあとのつなぎめ合わせは、この紙を使う
+  function bake() {
+    layers = layers.map((layer, i) => {
+      const g = regs && regs[i];
+      if (!g) return layer;
+      const b = layer.reg.bbox, cv = newCanvas(layer.cv.width, layer.cv.height), c = cv.getContext('2d', { willReadFrequently: true });
+      const m = warpMatrix(g.su, g.sv, g.uT, g.uA, g.vA, g.vT);
+      c.setTransform(1, 0, 0, 1, -b.x, -b.y);
+      c.clip(layer.reg.path);
+      c.setTransform(m[0], m[1], m[2], m[3], m[4] - b.x, m[5] - b.y);
+      c.drawImage(layer.cv, b.x, b.y);
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      return { reg: layer.reg, cv, ctx: c };
+    });
   }
 
   // t = 0：描いたまま、t = 1：つなぎめを合わせた形
@@ -783,8 +949,29 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
     }
     compose(0, true);
     if (k < tasks.length) { timer = setTimeout(drawFrame, 16); return; }
-    result = analyze(layout, layers);
     if (hooks.onFit) hooks.onFit();
+    // 第1段階：見本の範囲に合わせる（見本があるときだけ）
+    regs = targets ? registration(layout, layers, targets) : null;
+    if (regs && regs.some(Boolean)) {
+      const began1 = Date.now();
+      const regFrame = () => {
+        if (stopped) return;
+        const raw = Math.min(1, (Date.now() - began1) / 1000);
+        composeReg(raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2);
+        if (raw < 1) { timer = setTimeout(regFrame, 16); return; }
+        bake();
+        regs = null;
+        seamStage(200);
+      };
+      timer = setTimeout(regFrame, 400);
+      return;
+    }
+    seamStage(500);
+  }
+
+  // 第2段階：つなぎめを合わせる
+  function seamStage(wait) {
+    result = analyze(layout, layers, !!targets);
     const began = Date.now();
     const fitFrame = () => {
       if (stopped) return;
@@ -794,12 +981,14 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
       if (raw < 1) { timer = setTimeout(fitFrame, 16); return; }
       if (hooks.onDone) hooks.onDone({ score: result.score, scores: result.scores, joints: result.joints, fit: result.fit });
     };
-    timer = setTimeout(fitFrame, 500);
+    timer = setTimeout(fitFrame, wait);
   }
   drawFrame();
 
   return {
     stop() { stopped = true; clearTimeout(timer); },
+    // パートごとの絵（見本の範囲に合わせたあとのもの）。点数をパートごとにつけるときに使う
+    partCanvases() { return layers.map((l) => l.cv); },
     // 保存・シェア用：できあがった絵を、別のキャンバスに写して返す
     toCanvas() {
       const copy = newCanvas(layout.w, layout.h);
