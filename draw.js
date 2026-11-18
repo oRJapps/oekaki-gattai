@@ -509,9 +509,11 @@ function mainSpans(layout, scaledOps) {
 
 // 各自の絵を、見本の同じパートの範囲に合わせる方法を決める（大きく描いた人も、小さく描いた人も、同じ大きさと位置にそろえる）。
 // 返す値：パートごとに { su, sv, uA, uT, vA, vT }（u' = uT + su(u - uA)、v' = vT + sv(v - vA)）。動かさないパートは null
-function registration(layout, layers, targets) {
+// skip：動かさないパートの番号（シングルの CPU のパート。見本そのものなので、動かさない）
+function registration(layout, layers, targets, skip = -1) {
   const n = layout.count;
   return layers.map((l, i) => {
+    if (i === skip) return null;
     const T = targets && targets[i] && targets[i].fbox;
     if (!T) return null;
     const A = frameBox(layout, l.ctx.getImageData(0, 0, l.cv.width, l.cv.height), i);
@@ -534,7 +536,9 @@ function registration(layout, layers, targets) {
       // 1) 体どうしを合わせる：自分の絵の体（いちばん奥まで続く部分）を、見本の同じパートの体に重ねる。
       //    ヒレも描いた人、胴体だけ描いた人のどちらでも、胴体が胴体につながる
       const scv = targets[i].cv, sImg = scv.getContext('2d').getImageData(0, 0, scv.width, scv.height);
-      const tb = bodySpan(layout, sImg, i, cut, side), ub = bodySpan(layout, img, i, cutEff, side);
+      // 見本の体も、人の絵の体も、同じ決まり（つなぎめに届く、いちばん広い面）でさがす。決め方がちがうと、大きさがずれる
+      const mainK = targets.mains ? targets.mains[seam] : null;
+      const tb = bodySpan(layout, sImg, i, cut, side) || mainK, ub = bodySpan(layout, img, i, cutEff, side);
       let from = null, to = null;
       dbg.tb = tb && tb.map(Math.round); dbg.ub = ub && ub.map(Math.round); dbg.gap = Math.round(Math.abs(cutEff - cut));
       if (tb && ub) { from = ub; to = tb; dbg.how = '体'; }
@@ -549,6 +553,10 @@ function registration(layout, layers, targets) {
       if (from) {
         su2 = clamp((to[1] - to[0]) / (from[1] - from[0]), 0.6, 2.5);
         uA = (from[0] + from[1]) / 2; uT = (to[0] + to[1]) / 2;
+        // 大きくしたときに、絵がわくの外に出て切れないように、倍率をおさえる（10ドットまでは、はみ出してよい）
+        if (uA - A.u0 > 1) su2 = Math.min(su2, (uT + 10) / (uA - A.u0));
+        if (A.u1 - uA > 1) su2 = Math.min(su2, (layout.edgeLen + 10 - uT) / (A.u1 - uA));
+        su2 = Math.max(0.6, su2);
         sv = clamp(su2, 0.6, Math.max(0.6, layout.depth / Av)); // たても同じ倍率。パートの奥行きをこえない
         byMain = true;
         dbg.from = from.map(Math.round); dbg.to = to.map(Math.round);
@@ -599,7 +607,7 @@ function gapOf(layout, img, i, cut, side) {
 const CELL = 4, THIN_RUN = 24, BODY_RUN = 40;
 // つなぎめから見た「絵のシルエット」のます目を作る。outside[r * cols + c] = 1 なら、そこは絵の外
 //   c：つなぎめに沿った位置（CELL ドットごと）、r：つなぎめからの深さ（CELL ドットごと）
-function seamGrid(layout, img, i, cut, side) {
+export function seamGrid(layout, img, i, cut, side) {
   const f = layout.frame, b = layout.regions[i].bbox;
   const cols = Math.floor(layout.edgeLen / CELL) + 1, rows = Math.max(10, Math.floor(layout.depth / CELL));
   const inkAt = (u, d) => {
@@ -629,46 +637,86 @@ function seamGrid(layout, img, i, cut, side) {
   return { cols, rows, outside };
 }
 
-// 絵の「体」が、つなぎめに沿ってどこからどこまでか。体 = つなぎめから見て、いちばん奥まで続いている部分。
-// 魚なら胴体（尾まで続く）。ヒレは奥行きが浅いので、入らない。草花なら茎（葉は浅い）。
-// 見本にも、人が描いた絵にも、同じ決まりを使う。体が見つからなければ null
-function bodySpan(layout, img, i, cut, side) {
-  const { cols, rows, outside } = seamGrid(layout, img, i, cut, side);
-  const depth = new Uint16Array(cols);
-  let maxD = 0, at = -1;
-  for (let c = 0; c < cols; c++) {
-    let n = 0;
-    for (let r = 0; r < rows; r++) if (!outside[r * cols + c]) n++;
-    depth[c] = n;
-    if (n > maxD) { maxD = n; at = c; }
-  }
-  if (maxD < 10) return null; // 奥行きが40ドットより浅い絵は、体と見ない
-  const thr = Math.max(6, maxD * 0.5);
-  // いちばん深い所から左右へ、深さが半分以上ある間だけ広げる（3ますまでの切れ目は、つながっていると見る）
-  const grow = (dir) => {
-    let c = at, miss = 0, edge = at;
-    while (c + dir >= 0 && c + dir < cols && miss <= 3) {
-      c += dir;
-      if (depth[c] >= thr) { edge = c; miss = 0; } else miss++;
-    }
-    return edge;
+// 絵の「体」が、つなぎめを通る範囲 [u0, u1]。なければ null。
+// 決め方：絵を、黒っぽい線で区切られた「面」に分ける（色のちがいでは分けない）。線だけの絵では、線でかこまれた中が1つの面になる。
+// つなぎめに届いている面のうち、いちばん広い面が体。
+//   魚：胴体の面は広く、ヒレの面はせまい（胴体とヒレは、線や色で分かれている）→ 胴体が体
+//   体の中に引いた線（とじていない線）は、面を分けないので、体は1つのまま
+//   ななめにのびる絵（きゅうり）でも、つなぎめを通っている所だけを見る
+export function bodySpan(layout, img, i, cut, side) {
+  const f = layout.frame, b = layout.regions[i].bbox;
+  const cols = Math.floor(layout.edgeLen / CELL) + 1, rows = Math.max(10, Math.floor(layout.depth / CELL));
+  // ますごとの色の種類：0 = 何もない、1 = 黒っぽい、2〜7 = 色あい（60度ずつ）、8 = 灰色・白っぽい
+  const kindAt = (u, d) => {
+    const [x, y] = toWorld(f, u, cut + side * d);
+    const px = Math.round(x - b.x), py = Math.round(y - b.y);
+    if (px < 0 || py < 0 || px >= img.width || py >= img.height) return 0;
+    const k = (py * img.width + px) * 4;
+    if (img.data[k + 3] <= 60) return 0;
+    const r = img.data[k], g = img.data[k + 1], bl = img.data[k + 2];
+    if (0.3 * r + 0.59 * g + 0.11 * bl < 75) return 1;
+    const max = Math.max(r, g, bl), min = Math.min(r, g, bl);
+    if (max - min < 40) return 8;
+    let hue = max === r ? ((g - bl) / (max - min)) % 6 : max === g ? (bl - r) / (max - min) + 2 : (r - g) / (max - min) + 4;
+    if (hue < 0) hue += 6;
+    return 2 + (Math.floor(hue) % 6);
   };
-  const c0 = grow(-1), c1 = grow(1);
-  // つなぎめの近く（34ドット以内）に絵がなければ、つなぎめに届いていない
-  const near = Math.min(rows, Math.ceil(34 / CELL));
-  let touches = false;
-  for (let c = c0; c <= c1 && !touches; c++) for (let r = 0; r < near; r++) if (!outside[r * cols + c]) { touches = true; break; }
-  if (!touches || (c1 - c0) * CELL < 40) return null;
-  // 体のはしを、輪かくの線（または色のさかいめ）の位置に合わせる。
-  // 「深さが半分以上」で切ると、丸い体では輪かくより少し内がわになるので、外がわのいちばん近い線まで広げる（体のはばの35%まで）
-  let u0 = c0 * CELL, u1 = c1 * CELL;
+  const kind = new Uint8Array(cols * rows);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const u = c * CELL, d = 1 + r * CELL;
+    // ますの中の4か所を見る。黒い線が少しでもかかっていれば「線」（細い線が、面どうしのしきりになるように）
+    const ks = [kindAt(u, d), kindAt(u + 2, d), kindAt(u, d + 2), kindAt(u + 2, d + 2)];
+    // 面を分けるのは、黒っぽい線だけ。色のちがい（魚の白いおなかと青い背中）では分けない：色つきは全部「2」にまとめる
+    kind[r * cols + c] = ks.includes(1) ? 1 : (ks.some((v) => v > 0) ? 2 : 0);
+  }
+  // 外がわ：何もないますのうち、つなぎめの反対がわと左右のはしからたどれる所
+  const outside = new Uint8Array(cols * rows), stack = [];
+  for (let c = 0; c < cols; c++) stack.push((rows - 1) * cols + c);
+  for (let r = 0; r < rows; r++) stack.push(r * cols, r * cols + cols - 1);
+  while (stack.length) {
+    const k = stack.pop();
+    if (outside[k] || kind[k]) continue;
+    outside[k] = 1;
+    const c = k % cols;
+    if (c > 0) stack.push(k - 1);
+    if (c < cols - 1) stack.push(k + 1);
+    if (k >= cols) stack.push(k - cols);
+    if (k < cols * (rows - 1)) stack.push(k + cols);
+  }
+  // 面に分ける（同じ色の種類が、上下左右につながっているます）
+  const near = Math.min(rows, Math.ceil(34 / CELL)), seen = new Uint8Array(cols * rows);
+  let best = null;
+  for (let start = 0; start < cols * rows; start++) {
+    if (seen[start] || outside[start]) continue;
+    const kd = kind[start];
+    let area = 0, c0 = Infinity, c1 = -Infinity;
+    const st = [start];
+    seen[start] = 1;
+    while (st.length) {
+      const k = st.pop(), c = k % cols, r = (k - c) / cols;
+      area++;
+      if (r < near) { if (c < c0) c0 = c; if (c > c1) c1 = c; }
+      for (const nb of [c > 0 ? k - 1 : -1, c < cols - 1 ? k + 1 : -1, k - cols, k + cols]) {
+        if (nb < 0 || nb >= cols * rows || seen[nb] || outside[nb] || kind[nb] !== kd) continue;
+        seen[nb] = 1;
+        st.push(nb);
+      }
+    }
+    if (c1 < c0 || (c1 - c0) * CELL < 30) continue; // つなぎめに届いていない、または、せますぎる
+    // 黒い線の面（輪かくそのもの）は、ほかに面がないときだけ体と見る
+    const score = kd === 1 ? area * 0.05 : area;
+    if (!best || score > best.score) best = { score, c0, c1 };
+  }
+  if (!best) return null;
+  // はしを、すぐ外がわの輪かくの線（目印）に合わせる（24ドット以内）
+  let u0 = best.c0 * CELL, u1 = best.c1 * CELL;
   const data = [];
   data[i] = img;
-  const ms = marks(layout, data, i, cut, side), reach = 0.35 * (u1 - u0);
-  const lo = ms.filter((m) => m <= u0 + 12 && m >= u0 - reach), hi = ms.filter((m) => m >= u1 - 12 && m <= u1 + reach);
-  if (lo.length) u0 = lo[lo.length - 1];
-  if (hi.length) u1 = hi[0];
-  return [u0, u1];
+  const ms = marks(layout, data, i, cut, side);
+  const lo = ms.filter((m) => m <= u0 + 8 && m >= u0 - 24), hi = ms.filter((m) => m >= u1 - 8 && m <= u1 + 24);
+  if (lo.length) u0 = lo[0];
+  if (hi.length) u1 = hi[hi.length - 1];
+  return u1 - u0 >= 40 ? [u0, u1] : null;
 }
 
 function profile(layout, data, i, cut, side) {
@@ -1083,7 +1131,7 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
     if (k < tasks.length) { timer = setTimeout(drawFrame, 16); return; }
     if (hooks.onFit) hooks.onFit();
     // 第1段階：見本の範囲に合わせる（見本があるときだけ）
-    regs = targets ? registration(layout, layers, targets) : null;
+    regs = targets ? registration(layout, layers, targets, Number.isInteger(hooks.cpuPart) ? hooks.cpuPart : -1) : null;
     lockedParts = regs ? regs.map((g) => !!(g && g.locked)) : [];
     regInfo = regs ? regs.map((g) => (g ? { ...g.dbg, su: +g.su.toFixed(2), sv: +g.sv.toFixed(2), idle: !!g.idle } : null)) : null; // 確認用
     if (regs && regs.some((g) => g && !g.idle)) {
