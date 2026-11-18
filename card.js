@@ -75,7 +75,7 @@ export async function makeCard(drawing, topic, credits, extra = {}) {
   // タイトルの丸い文字を、キャンバスに描く前に読みこんでおく（読みこめなくても、ほかの文字で描く）
   try {
     await Promise.all([
-      document.fonts.load(`80px "Mochiy Pop One"`, 'お絵かき合体お題つながり度そっくり点おてほん#0123456789' + topic),
+      document.fonts.load(`80px "Mochiy Pop One"`, 'お絵かき合体お題つながり度そっくりスコア点おてほん#0123456789' + topic),
       document.fonts.load(`700 30px "Zen Maru Gothic"`, credits.map((k) => k.text).join('') + 'orjapps'),
     ]);
   } catch (e) { /* そのまま進む */ }
@@ -152,7 +152,7 @@ export async function makeCard(drawing, topic, credits, extra = {}) {
     roundRect(c, -150, -52, 300, 104, 22); c.fillStyle = GOLD; c.fill();
     c.lineWidth = 6; c.strokeStyle = INK; c.stroke();
     c.font = `22px ${DISPLAY}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = INK;
-    c.fillText(extra.scoreLabel || 'つながり度', 0, -26);
+    c.fillText(extra.scoreLabel || '合体スコア', 0, -26);
     sticker(c, `${extra.score}点`, 0, 16, 50, RED, 10, 5);
     c.restore();
   }

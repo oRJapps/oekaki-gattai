@@ -205,7 +205,7 @@ export function jackpot(picture, onEnd) {
   title.textContent = '100点';
   const sub = document.createElement('p');
   sub.className = 'jackpot-sub';
-  sub.textContent = 'パーフェクト！ 見本そっくり！';
+  sub.textContent = 'パーフェクト！ すごい合体！';
   const skip = document.createElement('button');
   skip.className = 'btn ghost jackpot-skip';
   skip.type = 'button';

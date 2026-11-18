@@ -1356,6 +1356,72 @@ export function similarity(picture, sample) {
 export const SCORE = { wShape: 0.3, wColor: 0.2, wPlace: 0.5, shapeFull: 0.8, colorFull: 0.6, near1: 0.85, near2: 0.6, far: 0.15, inside: 0.3, ink: 0.15, low: 0.25, full: 0.9, curve: 0.7, lineShape: 0, lineLow: 0.3, lineFull: 0.85,
   topFrom: 0.6, topFull: 1, topLineFull: 0.98, strictLow: 0.5, strictHigh: 0.97 };
 
+// ---------- 点数：4つの数値（接続・カラフル・描きこみ・バランス） ----------
+// 合体した絵から、4つの数値（0〜1）を出す。見本とはくらべない。
+//   merged：合体した絵（白い紙に全員の絵をのせたもの）。partCvs：パートごとの絵（何もない所は透明）。
+//   which：色と描きこみを数えるパートの番号（シングルでは自分のパートだけ。null なら全部）
+//   C 接続：つなぎめの両がわ（2〜8ドット）で、同じ位置に絵がある割合
+//   V カラフル：色の種類（3種類以上で満点）を7割、あざやかさを3割
+//   D 描きこみ：ぬった割合が15〜40%なら満点。少ないと下がる。多すぎても下がる（5割まで）
+//   B バランス：絵の重心が、キャンバスの中心に近いほど高い
+export function scoreCVDB(merged, partCvs, layout, which = null) {
+  const f = layout.frame, W = layout.w, H = layout.h;
+  const md = merged.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  const inkAt = (x, y) => {
+    x = Math.round(x); y = Math.round(y);
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    const k = (y * W + x) * 4;
+    return md[k] < 235 || md[k + 1] < 235 || md[k + 2] < 235;
+  };
+  // --- C：接続 ---
+  let cSum = 0, cN = 0;
+  layout.cuts.forEach((cut) => {
+    let both = 0, one = 0;
+    for (let u = 4; u < layout.edgeLen - 4; u += 2) {
+      let a = false, b = false;
+      for (let d = 2; d <= 8 && !(a && b); d += 2) {
+        const [xa, ya] = toWorld(f, u, cut - d), [xb, yb] = toWorld(f, u, cut + d);
+        a = a || inkAt(xa, ya); b = b || inkAt(xb, yb);
+      }
+      if (a && b) both++; else if (a || b) one++;
+    }
+    cSum += both + one ? both / (both + one) : 0;
+    cN++;
+  });
+  const C = cN ? cSum / cN : 0;
+  // --- V・D：色と描きこみ（数えるパートだけ）、B：重心（全部のパート） ---
+  const counts = new Float64Array(13); // 0〜11 = 色あい（30度ずつ）、12 = 黒・灰色・白
+  let ink = 0, sat = 0, area = 0, bx = 0, by = 0, bn = 0;
+  partCvs.forEach((cv, i) => {
+    const reg = layout.regions[i], rb = reg.bbox, counted = !which || which.includes(i);
+    const d = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, cv.width, cv.height).data;
+    if (counted) area += (rb.w * rb.h) * (reg.rect ? 1 : 0.5) / 4; // 2ドットおきに数えるので、面積も4分の1
+    for (let y = 0; y < cv.height; y += 2) for (let x = 0; x < cv.width; x += 2) {
+      const k = (y * cv.width + x) * 4;
+      if (d[k + 3] <= 60) continue;
+      bx += rb.x + x; by += rb.y + y; bn++;
+      if (!counted) continue;
+      ink++;
+      const r = d[k], g = d[k + 1], b = d[k + 2], max = Math.max(r, g, b), min = Math.min(r, g, b);
+      if (max - min < 42) { counts[12]++; continue; }
+      sat += (max - min) / max;
+      let hue = max === r ? ((g - b) / (max - min)) % 6 : max === g ? (b - r) / (max - min) + 2 : (r - g) / (max - min) + 4;
+      if (hue < 0) hue += 6;
+      counts[Math.floor(hue * 2) % 12]++;
+    }
+  });
+  if (!ink) return { C, V: 0, D: 0, B: 0, empty: true, frac: 0, kinds: 0 };
+  // 色の種類：絵の6%以上をしめる色だけを数える。となりどうしの色あい（赤とオレンジなど）も、別の色と数える
+  let kinds = 0;
+  for (let i = 0; i < 13; i++) if (counts[i] >= 0.06 * ink) kinds++;
+  const V = 0.7 * Math.min(1, kinds / 3) + 0.3 * (sat / ink);
+  const frac = Math.min(1, ink / Math.max(1, area));
+  const D = frac < 0.15 ? frac / 0.15 : frac <= 0.40 ? 1 : Math.max(0.5, 1 - ((frac - 0.40) / 0.60) * 0.5);
+  const dist = Math.hypot(bx / bn - W / 2, by / bn - H / 2) / Math.max(W, H);
+  const B = Math.max(0, 1 - dist / 0.35);
+  return { C, V, D, B, empty: false, frac, kinds };
+}
+
 // 1つのパートだけを描いた絵を作る（シングルで、自分のパートと見本の同じパートをくらべるときに使う）
 export function partPicture(layout, part, ops) {
   const layer = new Layer(layout.regions[part]);

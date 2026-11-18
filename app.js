@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261118175029';
-import { loadSample, loadAlternates } from './samples.js?v=20261118175029';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers } from './draw.js?v=20261118175029';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261118175029';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261118175029';
-import { makeCard } from './card.js?v=20261118175029';
-import * as net from './net.js?v=20261118175029';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261118175347';
+import { loadSample, loadAlternates } from './samples.js?v=20261118175347';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB } from './draw.js?v=20261118175347';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261118175347';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261118175347';
+import { makeCard } from './card.js?v=20261118175347';
+import * as net from './net.js?v=20261118175347';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -907,13 +907,20 @@ function checkAllParts() {
   if (needed.every((o) => G.done.has(o.id))) revealScreen();
 }
 
-// 点数（そっくり度）にそえるひとこと
-const BEST_KEY = 'oekaki_best_similarity';
+// 点数（合体スコア）：合体した絵から4つの数値（接続 C・カラフル V・描きこみ D・バランス B）を出して、難易度ごとの重みで足す。
+// 見本とはくらべない。重みは、合わせて 1 になるようにする。
+//   初級：描きこみとバランス（がんばって描いたか）を重く。上級：接続（つなぎめが合っているか）を重く
+const SCORE_WEIGHTS = {
+  A: { C: 0.20, V: 0.20, D: 0.30, B: 0.30 },
+  B: { C: 0.35, V: 0.25, D: 0.20, B: 0.20 },
+  C: { C: 0.50, V: 0.20, D: 0.15, B: 0.15 },
+};
+const BEST_KEY = 'oekaki_best_score2';
 function rankWord(score) {
   if (score >= 100) return 'パーフェクト！！';
-  if (score >= 90) return '見本そっくり！！';
-  if (score >= 80) return 'かなりそっくり！';
-  if (score >= 65) return 'かなり似てる！';
+  if (score >= 90) return 'すごい合体！！';
+  if (score >= 80) return 'いい合体！';
+  if (score >= 65) return 'なかなか！';
   if (score >= 45) return 'おしい！';
   if (score >= 25) return 'ふんいきは出てる！';
   return '新しい生き物が誕生！';
@@ -934,19 +941,19 @@ function revealScreen() {
   const status = h('p', { class: 'merging', id: 'reveal-status', role: 'status' }, '合体中…');
   const caption = h('p', { class: 'chips', id: 'caption' },
     r.owners.map((name, i) => h('span', { class: 'chip', style: `--seat:${seatColor(i)}` }, h('i', { class: 'dot' }), `${regs[i].label}：${name}`)));
-  // 点数（そっくり度：見本にどれだけ近いか）。合体が終わったら出す
+  // 点数（合体スコア）。合体が終わったら出す
   const scoreNum = h('b', { id: 'score' }, '0');
   const rank = h('em', { id: 'rank' }, '');
   const scoreNote = h('p', { class: 'note', id: 'score-note' }, '');
   const scoreBox = h('div', { class: 'scorebox', id: 'scorebox', hidden: true },
-    h('small', { id: 'score-label' }, 'そっくり度'), h('span', { class: 'points' }, scoreNum, '点'), rank);
+    h('small', { id: 'score-label' }, '合体スコア'), h('span', { class: 'points' }, scoreNum, '点'), rank);
   // 見本（おてほん）。合体が終わったら、絵の左上に出す
   // 絵のファイルは、ここで読みこむ（合体のアニメーションの間に読み終わる）。組み合わせお題では、ことばに合った飾りをつけた見本を出す
   const parsed = parseTopic(r.topic) || { base: r.topic, mod: '' };
   const base = parsed.base;
   const sampleCv = h('canvas', {});
   let sampleReady = false;
-  let scoreLabel = 'そっくり度', sampleOpsAll = null;
+  let scoreLabel = '合体スコア', sampleOpsAll = null;
   const isLeft = topicDir(base) === '左向き';
   let alternates = []; // 見本のほかに「これでも正解」とする絵（リボンを首につけた絵、飾りなしの絵）
   let targets = null; // 見本の、パートごとの絵と範囲（合体で大きさを合わせる先。点数もパートごとにくらべる）
@@ -981,26 +988,12 @@ function revealScreen() {
     // シングル：自分が描いたパートだけを、見本の同じパートとくらべる（CPU のパートは見本そのものなので、点数に入れない）
     // 組み合わせお題：飾りの場所は人によってちがう（リボンは耳にも首にも尻尾にもつける）ので、
     // 「これでも正解」の絵ともくらべて、いちばん高い点数を使う
-    // 点数はパートごとにつける：各パートを、見本の同じパートとくらべて、平均する（見本の絵が多いパートほど重く数える）。
-    // 1人の絵がずれていても、ほかの人の点数まで大きく下がらないようにするため
-    if (sampleReady && targets) {
-      const refs = [{ ops: sampleOpsAll, weight: 1 }, ...alternates];
-      const mine = G.reveal.partCanvases();
-      const which = r.solo ? [r.myPart] : mine.map((_, i) => i);
-      finalScore = Math.max(...refs.map((ref) => {
-        const tg = ref.ops === sampleOpsAll ? targets : samplePartLayers(G.layout, ref.ops);
-        let sum = 0, total = 0;
-        for (const i of which) {
-          const fb = tg[i] && tg[i].fbox;
-          if (!fb) continue; // 見本に絵がないパートは、数えない
-          const weightI = Math.max(1, (fb.u1 - fb.u0) * (fb.v1 - fb.v0));
-          sum += weightI * similarity(mine[i], tg[i].cv);
-          total += weightI;
-        }
-        return total ? Math.round((sum / total) * ref.weight) : 0;
-      }));
-    }
-    else { finalScore = result.score; scoreLabel = 'つながり度'; document.getElementById('score-label').textContent = scoreLabel; }
+    // 点数：合体した絵から4つの数値を出して、難易度ごとの重みで足す（見本とはくらべない）。
+    // シングル：色と描きこみは、自分が描いたパートだけで数える（CPU のパートは見本そのものなので）。何も描いていなければ0点
+    const parts4 = scoreCVDB(G.reveal.toCanvas(), G.reveal.partCanvases(), G.layout, r.solo ? [r.myPart] : null);
+    const wts = SCORE_WEIGHTS[G.level] || SCORE_WEIGHTS.B;
+    finalScore = parts4.empty ? 0 : Math.round(100 * (wts.C * parts4.C + wts.V * parts4.V + wts.D * parts4.D + wts.B * parts4.B));
+    result.parts4 = parts4;
     status.textContent = '合体！';
     status.className = 'stamp';
     easel.classList.add('flash');
@@ -1016,10 +1009,11 @@ function revealScreen() {
       if (t >= 1) { clearInterval(count); celebrate(); }
     }, 30);
     G.timers.push(count);
-    rank.textContent = sampleReady ? rankWord(finalScore) : '';
+    rank.textContent = rankWord(finalScore);
     let best = 0;
     try { best = parseInt(localStorage.getItem(BEST_KEY), 10) || 0; } catch (e) { /* なくてもよい */ }
-    const joint = sampleReady ? `つながり度：${result.score}点　` : '';
+    const pt = (x) => Math.round(100 * x);
+    const joint = `つながり${pt(parts4.C)}・カラフル${pt(parts4.V)}・描きこみ${pt(parts4.D)}・バランス${pt(parts4.B)}　`;
     if (finalScore > best) {
       try { localStorage.setItem(BEST_KEY, String(finalScore)); } catch (e) { /* 保存できなくてもよい */ }
       scoreNote.textContent = joint + (best ? `自己ベスト更新！（前は ${best}点）` : 'これが最初の記録！');
@@ -1036,7 +1030,7 @@ function revealScreen() {
     if (celebrated || G.round !== r || G.phase !== 'reveal' || !G.reveal) return;
     celebrated = true;
     const forced = parseInt(new URLSearchParams(location.search).get('fx'), 10);
-    const level = Number.isFinite(forced) ? forced : (sampleReady ? finalScore : 0);
+    const level = Number.isFinite(forced) ? forced : finalScore;
     const boom = () => { if (G.round === r && G.phase === 'reveal') { sfx('fireworks'); fireworks(); } };
     if (level >= 100) { sfx('jackpot'); jackpot(G.reveal.toCanvas(), boom); }
     else if (level >= 90) boom();
@@ -1046,7 +1040,8 @@ function revealScreen() {
   const showDebug = (result) => {
     const ver = new URL(import.meta.url).searchParams.get('v') || '（なし）';
     const span = (x) => (x ? `${Math.round(x[0])}〜${Math.round(x[1])}` : 'なし');
-    const lines = [`版：${ver}`, `合体のしかた：${result.simple ? 'シンプル（描いたまま並べる）' : '見本に合わせる'}`, `お題：${r.topic}／分け方：${G.layout.id}／人数：${r.count}／自分のパート：${r.myPart}${r.solo ? '（シングル）' : ''}`, `見本の読みこみ：${result.hasTargets ? 'できた' : 'できていない'}`];
+    const q = result.parts4 || {};
+    const lines = [`版：${ver}`, `点数：接続C=${(q.C || 0).toFixed(2)} カラフルV=${(q.V || 0).toFixed(2)}（色${q.kinds || 0}種類） 描きこみD=${(q.D || 0).toFixed(2)}（ぬった割合${Math.round(100 * (q.frac || 0))}%） バランスB=${(q.B || 0).toFixed(2)}／難易度=${G.level}`, `合体のしかた：${result.simple ? 'シンプル（描いたまま並べる）' : '見本に合わせる'}`, `お題：${r.topic}／分け方：${G.layout.id}／人数：${r.count}／自分のパート：${r.myPart}${r.solo ? '（シングル）' : ''}`, `見本の読みこみ：${result.hasTargets ? 'できた' : 'できていない'}`];
     (result.regInfo || []).forEach((g, i) => {
       if (!g) { lines.push(`パート${i}：動かしていない`); return; }
       lines.push(`パート${i}：方法＝${g.how}${g.idle ? '（もう合っていた）' : ''}　自分の体＝${span(g.ub)}　見本の体＝${span(g.tb)}　合わせた範囲＝${span(g.from)} → ${span(g.to)}　倍率＝横${g.su}・たて${g.sv}　すきま＝${g.gap || 0}`);
