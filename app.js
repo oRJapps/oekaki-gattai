@@ -5,19 +5,21 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261118171005';
-import { loadSample, loadAlternates } from './samples.js?v=20261118171005';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers } from './draw.js?v=20261118171005';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261118171005';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261118171005';
-import { makeCard } from './card.js?v=20261118171005';
-import * as net from './net.js?v=20261118171005';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261118173403';
+import { loadSample, loadAlternates } from './samples.js?v=20261118173403';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers } from './draw.js?v=20261118173403';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261118173403';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261118173403';
+import { makeCard } from './card.js?v=20261118173403';
+import * as net from './net.js?v=20261118173403';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
 // 描く時間は180秒。確認用に ?sec=10 のように短くできる
 const DRAW_SECONDS = Math.max(5, parseInt(params.get('sec'), 10) || 180);
 const INTRO_MS = 4000; // お題と、自分が描くパートを見せる時間
+// 合体のしかた。true：描いたままの絵を、そのまま並べる（大きさや位置を合わせない）。false：見本に合わせて大きさ・位置を直してから、つなぎめを合わせる
+const SIMPLE_MERGE = true;
 const SAMPLE_MS = 2000; // お手本（シルエット）を見せる時間。最初のこの間だけ見える
 const SITE_URL = 'https://orjapps.github.io/oekaki-gattai/'; // シェアするときに入れる公開先
 // スマホかタブレットなら true（iPad は Mac と名のるので、タッチできるかどうかも見る）
@@ -1042,7 +1044,7 @@ function revealScreen() {
   const showDebug = (result) => {
     const ver = new URL(import.meta.url).searchParams.get('v') || '（なし）';
     const span = (x) => (x ? `${Math.round(x[0])}〜${Math.round(x[1])}` : 'なし');
-    const lines = [`版：${ver}`, `お題：${r.topic}／分け方：${G.layout.id}／人数：${r.count}／自分のパート：${r.myPart}${r.solo ? '（シングル）' : ''}`, `見本の読みこみ：${result.hasTargets ? 'できた' : 'できていない'}`];
+    const lines = [`版：${ver}`, `合体のしかた：${result.simple ? 'シンプル（描いたまま並べる）' : '見本に合わせる'}`, `お題：${r.topic}／分け方：${G.layout.id}／人数：${r.count}／自分のパート：${r.myPart}${r.solo ? '（シングル）' : ''}`, `見本の読みこみ：${result.hasTargets ? 'できた' : 'できていない'}`];
     (result.regInfo || []).forEach((g, i) => {
       if (!g) { lines.push(`パート${i}：動かしていない`); return; }
       lines.push(`パート${i}：方法＝${g.how}${g.idle ? '（もう合っていた）' : ''}　自分の体＝${span(g.ub)}　見本の体＝${span(g.tb)}　合わせた範囲＝${span(g.from)} → ${span(g.to)}　倍率＝横${g.su}・たて${g.sv}　すきま＝${g.gap || 0}`);
@@ -1066,6 +1068,7 @@ function revealScreen() {
   const begin = () => {
     if (G.round !== r || G.phase !== 'reveal') return; // 読みこみの間に、ほかの画面へ行っていた
     G.reveal = startReveal(canvas, G.layout, parts, {
+      simple: SIMPLE_MERGE,
       targets,
       cpuPart: r.solo ? 1 - r.myPart : undefined, // シングル：CPU のパート（見本そのもの）
       onFit: () => { status.textContent = 'つなげています…'; },

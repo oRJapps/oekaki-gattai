@@ -952,7 +952,8 @@ function analyze(layout, layers, tight = false, mains = null, fixed = -1, locked
 
 // ---------- 合体 ----------
 // 1. 全員の絵を少しずつ描く → 2. つなぎめが合うように、それぞれの絵を拡大・縮小してずらす → 3. 点数を出す
-// hooks：{ onFit(), onDone(result), targets, cpuPart }。result = { score, scores }
+// hooks：{ onFit(), onDone(result), targets, cpuPart, simple }。result = { score, scores }
+//   simple：true なら、大きさや位置を合わせずに、描いたまま並べる
 //   cpuPart：見本そのものを描いたパートの番号（シングルの CPU）。なければ入れない
 //   targets：見本のパートごとの範囲（samplePartLayers の返す値）。あれば、先に各自の絵を見本の範囲に合わせてから、つなぎめを合わせる
 export function startReveal(canvas, layout, partsOps, hooks = {}) {
@@ -1129,6 +1130,20 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
     }
     compose(0, true);
     if (k < tasks.length) { timer = setTimeout(drawFrame, 16); return; }
+    // シンプルな合体（hooks.simple）：大きさも位置も変えない。描いたままの絵を、そのまま並べて終わり。
+    // つながり度の点数だけは、今までどおり計算する
+    if (hooks.simple) {
+      result = analyze(layout, layers, false);
+      result.fit = result.fit.map(() => ({ lo: null, hi: null, sv: 1 }));
+      result.joints.forEach((j) => { delete j.warp; });
+      amount = 1;
+      timer = setTimeout(() => {
+        if (stopped) return;
+        compose(1, false);
+        if (hooks.onDone) hooks.onDone({ score: result.score, scores: result.scores, joints: result.joints, fit: result.fit, regInfo: null, hasTargets: !!targets, simple: true });
+      }, 500);
+      return;
+    }
     if (hooks.onFit) hooks.onFit();
     // 第1段階：見本の範囲に合わせる（見本があるときだけ）
     regs = targets ? registration(layout, layers, targets, Number.isInteger(hooks.cpuPart) ? hooks.cpuPart : -1) : null;
