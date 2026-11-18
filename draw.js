@@ -526,15 +526,26 @@ function registration(layout, layers, targets) {
     // はしのパート：自分の絵がつなぎめに届いている範囲（輪かくの端から端）を、見本の「体」がつなぎめを通る範囲に合わせる。
     // 魚のように、つなぎめに体とヒレの両方がある絵で、輪かくがヒレのほうへ合ってしまうのを防ぐ
     const seam = n >= 2 && i === 0 ? 0 : n >= 2 && i === n - 1 ? n - 2 : -1;
-    const main = seam >= 0 && targets.mains ? targets.mains[seam] : null;
     let byMain = false;
-    if (main) {
-      const side = i === 0 ? -1 : 1, img = l.ctx.getImageData(0, 0, l.cv.width, l.cv.height), data = [];
-      data[i] = img;
-      const P = profile(layout, data, i, layout.cuts[seam] + side * gapOf(layout, img, i, layout.cuts[seam], side), side);
-      if (P.n && P.len >= 40) {
-        su2 = clamp((main[1] - main[0]) / P.len, 0.6, 2.5);
-        uA = P.c; uT = (main[0] + main[1]) / 2;
+    if (seam >= 0) {
+      const side = i === 0 ? -1 : 1, cut = layout.cuts[seam], img = l.ctx.getImageData(0, 0, l.cv.width, l.cv.height);
+      const cutEff = cut + side * gapOf(layout, img, i, cut, side);
+      // 1) 体どうしを合わせる：自分の絵の体（いちばん奥まで続く部分）を、見本の同じパートの体に重ねる。
+      //    ヒレも描いた人、胴体だけ描いた人のどちらでも、胴体が胴体につながる
+      const scv = targets[i].cv, sImg = scv.getContext('2d').getImageData(0, 0, scv.width, scv.height);
+      const tb = bodySpan(layout, sImg, i, cut, side), ub = bodySpan(layout, img, i, cutEff, side);
+      let from = null, to = null;
+      if (tb && ub) { from = ub; to = tb; }
+      else {
+        // 2) 体が見つからないとき（線がとぎれている絵など）：つなぎめに届いている範囲を、見本の体がつなぎめを通る範囲に合わせる
+        const main = targets.mains ? targets.mains[seam] : null, data = [];
+        data[i] = img;
+        const P = profile(layout, data, i, cutEff, side);
+        if ((tb || main) && P.n && P.len >= 40) { from = [P.a, P.b]; to = tb || main; }
+      }
+      if (from) {
+        su2 = clamp((to[1] - to[0]) / (from[1] - from[0]), 0.6, 2.5);
+        uA = (from[0] + from[1]) / 2; uT = (to[0] + to[1]) / 2;
         sv = clamp(su2, 0.6, Math.max(0.6, layout.depth / Av)); // たても同じ倍率。パートの奥行きをこえない
         byMain = true;
       }
@@ -547,8 +558,11 @@ function registration(layout, layers, targets) {
     if (byMain) { // つなぎめがわのはしを、つなぎめそのものに合わせる（すきまもつめる）
       if (i === 0) vT = layout.cuts[seam]; else vT = layout.cuts[seam];
     }
-    if (Math.abs(su2 - 1) < 0.03 && Math.abs(sv - 1) < 0.03 && Math.abs(uT - uA) < 4 && Math.abs(vT - vA) < 4) return null;
-    return { su: su2, sv, uA, uT, vA, vT };
+    // locked：体どうしを合わせた。このあとのつなぎめ合わせで、大きさと位置をもう一度変えない
+    // idle：動かす必要がない（もう合っている）
+    const idle = Math.abs(su2 - 1) < 0.03 && Math.abs(sv - 1) < 0.03 && Math.abs(uT - uA) < 4 && Math.abs(vT - vA) < 4;
+    if (idle && !byMain) return null;
+    return idle ? { su: 1, sv: 1, uA, uT: uA, vA, vT: vA, locked: byMain, idle: true } : { su: su2, sv, uA, uT, vA, vT, locked: byMain };
   });
 }
 
@@ -579,8 +593,10 @@ function gapOf(layout, img, i, cut, side) {
 // 絵は「シルエット」で見る：線でかこんだ中も、絵があると数える（線だけで描いた体も、ぬった体と同じはばになる）。
 // 細い線（足、ひげ、触角）は、太い所（体）があるときは、はばの計算から外す
 const CELL = 4, THIN_RUN = 24, BODY_RUN = 40;
-function profile(layout, data, i, cut, side) {
-  const f = layout.frame, b = layout.regions[i].bbox, img = data[i];
+// つなぎめから見た「絵のシルエット」のます目を作る。outside[r * cols + c] = 1 なら、そこは絵の外
+//   c：つなぎめに沿った位置（CELL ドットごと）、r：つなぎめからの深さ（CELL ドットごと）
+function seamGrid(layout, img, i, cut, side) {
+  const f = layout.frame, b = layout.regions[i].bbox;
   const cols = Math.floor(layout.edgeLen / CELL) + 1, rows = Math.max(10, Math.floor(layout.depth / CELL));
   const inkAt = (u, d) => {
     const [x, y] = toWorld(f, u, cut + side * d);
@@ -606,6 +622,53 @@ function profile(layout, data, i, cut, side) {
     if (k >= cols) stack.push(k - cols);
     if (k < cols * (rows - 1)) stack.push(k + cols);
   }
+  return { cols, rows, outside };
+}
+
+// 絵の「体」が、つなぎめに沿ってどこからどこまでか。体 = つなぎめから見て、いちばん奥まで続いている部分。
+// 魚なら胴体（尾まで続く）。ヒレは奥行きが浅いので、入らない。草花なら茎（葉は浅い）。
+// 見本にも、人が描いた絵にも、同じ決まりを使う。体が見つからなければ null
+function bodySpan(layout, img, i, cut, side) {
+  const { cols, rows, outside } = seamGrid(layout, img, i, cut, side);
+  const depth = new Uint16Array(cols);
+  let maxD = 0, at = -1;
+  for (let c = 0; c < cols; c++) {
+    let n = 0;
+    for (let r = 0; r < rows; r++) if (!outside[r * cols + c]) n++;
+    depth[c] = n;
+    if (n > maxD) { maxD = n; at = c; }
+  }
+  if (maxD < 10) return null; // 奥行きが40ドットより浅い絵は、体と見ない
+  const thr = Math.max(6, maxD * 0.5);
+  // いちばん深い所から左右へ、深さが半分以上ある間だけ広げる（3ますまでの切れ目は、つながっていると見る）
+  const grow = (dir) => {
+    let c = at, miss = 0, edge = at;
+    while (c + dir >= 0 && c + dir < cols && miss <= 3) {
+      c += dir;
+      if (depth[c] >= thr) { edge = c; miss = 0; } else miss++;
+    }
+    return edge;
+  };
+  const c0 = grow(-1), c1 = grow(1);
+  // つなぎめの近く（34ドット以内）に絵がなければ、つなぎめに届いていない
+  const near = Math.min(rows, Math.ceil(34 / CELL));
+  let touches = false;
+  for (let c = c0; c <= c1 && !touches; c++) for (let r = 0; r < near; r++) if (!outside[r * cols + c]) { touches = true; break; }
+  if (!touches || (c1 - c0) * CELL < 40) return null;
+  // 体のはしを、輪かくの線（または色のさかいめ）の位置に合わせる。
+  // 「深さが半分以上」で切ると、丸い体では輪かくより少し内がわになるので、外がわのいちばん近い線まで広げる（体のはばの35%まで）
+  let u0 = c0 * CELL, u1 = c1 * CELL;
+  const data = [];
+  data[i] = img;
+  const ms = marks(layout, data, i, cut, side), reach = 0.35 * (u1 - u0);
+  const lo = ms.filter((m) => m <= u0 + 12 && m >= u0 - reach), hi = ms.filter((m) => m >= u1 - 12 && m <= u1 + reach);
+  if (lo.length) u0 = lo[lo.length - 1];
+  if (hi.length) u1 = hi[0];
+  return [u0, u1];
+}
+
+function profile(layout, data, i, cut, side) {
+  const { cols, rows, outside } = seamGrid(layout, data[i], i, cut, side);
   const near = Math.min(rows, Math.ceil(34 / CELL)); // つなぎめから34ドットまでに絵があれば「とどいている」
   // run = [始まり, 終わり, 絵があるますの数, 列の数]
   let runs = [];
@@ -716,7 +779,8 @@ function marks(layout, data, i, cut, side) {
 // tight：先に見本の範囲へ合わせてあるとき。つなぎめ合わせの拡大・縮小を、ひかえめにする（1.25倍まで、0.85倍まで）
 // mains・fixed：見本の「体」がつなぎめを通る範囲と、見本そのものを描いたパート（シングルの CPU）の番号。
 //   CPU のパートのはばは、ヒレなどをふくめず、体の範囲と見る
-function analyze(layout, layers, tight = false, mains = null, fixed = -1) {
+// lockedParts：第1段階で、体どうしを合わせたパート。両がわがそうなら、そのつなぎめでは大きさと位置を変えない（細かい所の合わせだけ行う）
+function analyze(layout, layers, tight = false, mains = null, fixed = -1, lockedParts = []) {
   const data = layers.map((l) => l.ctx.getImageData(0, 0, l.cv.width, l.cv.height));
   const n = layout.count;
   // fit[i] = { lo, hi }：パート i の、手前のつなぎめ（lo）と向こうのつなぎめ（hi）での合わせ方
@@ -735,6 +799,13 @@ function analyze(layout, layers, tight = false, mains = null, fixed = -1) {
     const asMain = (P) => (main && P.n ? { n: P.n, len: main[1] - main[0], a: main[0], b: main[1], c: (main[0] + main[1]) / 2 } : P);
     if (fixed === k) A = asMain(A);
     if (fixed === k + 1) B = asMain(B);
+    const locked = !!(A.n && B.n && (lockedParts[k] || fixed === k) && (lockedParts[k + 1] || fixed === k + 1));
+    if (locked) {
+      fit[k].hi = { s: 1, P: A.c, Q: A.c, cut, gap: gaps[k] };
+      fit[k + 1].lo = { s: 1, P: B.c, Q: B.c, cut, gap: gaps[k + 1] };
+      joints.push({ A, B, sA: 1, sB: 1, Q: A.c, gapA: gaps[k], gapB: gaps[k + 1], locked: true });
+      return;
+    }
     let sA = 1, sB = 1;
     // 大きいほうに合わせる：大きいほうの絵は動かさず、小さいほうの絵を大きくして、位置もそろえる（2倍まで）
     const Q = A.n && B.n ? (A.len >= B.len ? A.c : B.c) : null;
@@ -770,7 +841,7 @@ function analyze(layout, layers, tight = false, mains = null, fixed = -1) {
   // 残りのぶんだけ大きいほうを小さくして、つなぎめのはばを近づける（7割まで）
   joints.forEach((j, k) => {
     const fa = fit[k].hi, fb = fit[k + 1].lo;
-    if (!fa || !fb || j.A.len < 40 || j.B.len < 40) return;
+    if (!fa || !fb || j.locked || j.A.len < 40 || j.B.len < 40) return;
     const lenA = j.A.len * fa.s, lenB = j.B.len * fb.s;
     const [big, bigIdx, ratio] = lenA > lenB ? [fa, k, lenB / lenA] : [fb, k + 1, lenA / lenB];
     if (ratio > 0.97) return;
@@ -879,7 +950,7 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
   }
 
   // 第1段階：各自の絵を、見本の同じパートの範囲に合わせる。t = 0：描いたまま、t = 1：合わせた形
-  let regs = null;
+  let regs = null, lockedParts = [];
   function composeReg(t) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
@@ -1009,7 +1080,8 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
     if (hooks.onFit) hooks.onFit();
     // 第1段階：見本の範囲に合わせる（見本があるときだけ）
     regs = targets ? registration(layout, layers, targets) : null;
-    if (regs && regs.some(Boolean)) {
+    lockedParts = regs ? regs.map((g) => !!(g && g.locked)) : [];
+    if (regs && regs.some((g) => g && !g.idle)) {
       const began1 = Date.now();
       const regFrame = () => {
         if (stopped) return;
@@ -1023,12 +1095,13 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
       timer = setTimeout(regFrame, 400);
       return;
     }
+    regs = null;
     seamStage(500);
   }
 
   // 第2段階：つなぎめを合わせる
   function seamStage(wait) {
-    result = analyze(layout, layers, !!targets, targets && targets.mains, Number.isInteger(hooks.cpuPart) ? hooks.cpuPart : -1);
+    result = analyze(layout, layers, !!targets, targets && targets.mains, Number.isInteger(hooks.cpuPart) ? hooks.cpuPart : -1, lockedParts);
     const began = Date.now();
     const fitFrame = () => {
       if (stopped) return;
