@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261117182058';
-import { loadSample, loadAlternates } from './samples.js?v=20261117182058';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers } from './draw.js?v=20261117182058';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261117182058';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261117182058';
-import { makeCard } from './card.js?v=20261117182058';
-import * as net from './net.js?v=20261117182058';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261118162204';
+import { loadSample, loadAlternates } from './samples.js?v=20261118162204';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers } from './draw.js?v=20261118162204';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261118162204';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261118162204';
+import { makeCard } from './card.js?v=20261118162204';
+import * as net from './net.js?v=20261118162204';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -1040,6 +1040,7 @@ function revealScreen() {
     if (G.round !== r || G.phase !== 'reveal') return; // 読みこみの間に、ほかの画面へ行っていた
     G.reveal = startReveal(canvas, G.layout, parts, {
       targets,
+      cpuPart: r.solo ? 1 - r.myPart : undefined, // シングル：CPU のパート（見本そのもの）
       onFit: () => { status.textContent = 'つなげています…'; },
       onDone: (result) => { sampleLoaded.then(() => finish(result), () => finish(result)); },
     });
