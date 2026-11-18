@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261118173403';
-import { loadSample, loadAlternates } from './samples.js?v=20261118173403';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers } from './draw.js?v=20261118173403';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261118173403';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261118173403';
-import { makeCard } from './card.js?v=20261118173403';
-import * as net from './net.js?v=20261118173403';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261118175029';
+import { loadSample, loadAlternates } from './samples.js?v=20261118175029';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers } from './draw.js?v=20261118175029';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261118175029';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261118175029';
+import { makeCard } from './card.js?v=20261118175029';
+import * as net from './net.js?v=20261118175029';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -20,6 +20,8 @@ const DRAW_SECONDS = Math.max(5, parseInt(params.get('sec'), 10) || 180);
 const INTRO_MS = 4000; // お題と、自分が描くパートを見せる時間
 // 合体のしかた。true：描いたままの絵を、そのまま並べる（大きさや位置を合わせない）。false：見本に合わせて大きさ・位置を直してから、つなぎめを合わせる
 const SIMPLE_MERGE = true;
+// 描く画面の「描ける範囲の四角」。false：四角を出さない。パートの中なら、どこにでも描ける
+const USE_BOX = false;
 const SAMPLE_MS = 2000; // お手本（シルエット）を見せる時間。最初のこの間だけ見える
 const SITE_URL = 'https://orjapps.github.io/oekaki-gattai/'; // シェアするときに入れる公開先
 // スマホかタブレットなら true（iPad は Mac と名のるので、タッチできるかどうかも見る）
@@ -792,7 +794,7 @@ function drawScreen() {
   // 描ける範囲：見本の絵がある範囲（少し余白つき）だけに描ける。全員が同じ大きさ・位置で描けるようにする
   r.targets.then((t) => {
     const mine = t && t[r.myPart];
-    if (G.round === r && G.pad === pad && mine && mine.box) pad.setLimit(mine.box);
+    if (USE_BOX && G.round === r && G.pad === pad && mine && mine.box) pad.setLimit(mine.box);
   });
 
   function mark(el, group) {
@@ -845,7 +847,7 @@ function drawScreen() {
       h('div', { class: 'toolrow' }, widthButtons,
         h('button', { class: 'tool', onclick: () => pad.undo() }, icon('undo'), '1つもどす'),
         h('button', { class: 'tool', onclick: () => pad.clear() }, icon('trash'), '全部消す'))),
-    h('p', { class: 'note', id: 'wait-text', role: 'status' }, '明るい四角の中に描こう。金色の点線が、となりの絵とのつなぎめ。線を点線までのばそう'),
+    h('p', { class: 'note', id: 'wait-text', role: 'status' }, (USE_BOX ? '明るい四角の中に描こう。' : '') + '金色の点線が、となりの絵とのつなぎめ。線を点線までのばそう'),
     h('button', { class: 'btn primary go', id: 'done-btn', onclick: submitPart }, icon('check'), 'できた！'),
   );
   tick();
@@ -1069,6 +1071,7 @@ function revealScreen() {
     if (G.round !== r || G.phase !== 'reveal') return; // 読みこみの間に、ほかの画面へ行っていた
     G.reveal = startReveal(canvas, G.layout, parts, {
       simple: SIMPLE_MERGE,
+      limit: USE_BOX, // 描いたときと同じにする（四角を使わないなら、合体でも使わない）
       targets,
       cpuPart: r.solo ? 1 - r.myPart : undefined, // シングル：CPU のパート（見本そのもの）
       onFit: () => { status.textContent = 'つなげています…'; },

@@ -963,7 +963,7 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
   const ctx = canvas.getContext('2d');
   let layers = layout.regions.map((r) => new Layer(r));
   const targets = hooks.targets || null;
-  if (targets) layers.forEach((l, i) => { if (targets[i] && targets[i].box) l.setLimit(targets[i].box); }); // 描いたときと同じ「描ける範囲」にする（ぬりつぶしが同じ結果になるように）
+  if (targets && hooks.limit !== false) layers.forEach((l, i) => { if (targets[i] && targets[i].box) l.setLimit(targets[i].box); }); // 描いたときと同じ「描ける範囲」にする（ぬりつぶしが同じ結果になるように）
   const tasks = [];
   partsOps.forEach((ops, pi) => (ops || []).forEach((op) => {
     if (op.f || op.g) tasks.push([pi, op, -1]);
