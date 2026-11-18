@@ -527,6 +527,7 @@ function registration(layout, layers, targets) {
     // 魚のように、つなぎめに体とヒレの両方がある絵で、輪かくがヒレのほうへ合ってしまうのを防ぐ
     const seam = n >= 2 && i === 0 ? 0 : n >= 2 && i === n - 1 ? n - 2 : -1;
     let byMain = false;
+    const dbg = { how: 'わく', A: [A.u0, A.u1, A.v0, A.v1].map(Math.round), T: [T.u0, T.u1, T.v0, T.v1].map(Math.round) }; // 確認用：どの方法で合わせたか
     if (seam >= 0) {
       const side = i === 0 ? -1 : 1, cut = layout.cuts[seam], img = l.ctx.getImageData(0, 0, l.cv.width, l.cv.height);
       const cutEff = cut + side * gapOf(layout, img, i, cut, side);
@@ -535,19 +536,22 @@ function registration(layout, layers, targets) {
       const scv = targets[i].cv, sImg = scv.getContext('2d').getImageData(0, 0, scv.width, scv.height);
       const tb = bodySpan(layout, sImg, i, cut, side), ub = bodySpan(layout, img, i, cutEff, side);
       let from = null, to = null;
-      if (tb && ub) { from = ub; to = tb; }
+      dbg.tb = tb && tb.map(Math.round); dbg.ub = ub && ub.map(Math.round); dbg.gap = Math.round(Math.abs(cutEff - cut));
+      if (tb && ub) { from = ub; to = tb; dbg.how = '体'; }
       else {
         // 2) 体が見つからないとき（線がとぎれている絵など）：つなぎめに届いている範囲を、見本の体がつなぎめを通る範囲に合わせる
         const main = targets.mains ? targets.mains[seam] : null, data = [];
         data[i] = img;
         const P = profile(layout, data, i, cutEff, side);
-        if ((tb || main) && P.n && P.len >= 40) { from = [P.a, P.b]; to = tb || main; }
+        dbg.P = P.n ? [P.a, P.b] : null;
+        if ((tb || main) && P.n && P.len >= 40) { from = [P.a, P.b]; to = tb || main; dbg.how = '端から端'; }
       }
       if (from) {
         su2 = clamp((to[1] - to[0]) / (from[1] - from[0]), 0.6, 2.5);
         uA = (from[0] + from[1]) / 2; uT = (to[0] + to[1]) / 2;
         sv = clamp(su2, 0.6, Math.max(0.6, layout.depth / Av)); // たても同じ倍率。パートの奥行きをこえない
         byMain = true;
+        dbg.from = from.map(Math.round); dbg.to = to.map(Math.round);
       }
     }
     let vA, vT;
@@ -562,7 +566,7 @@ function registration(layout, layers, targets) {
     // idle：動かす必要がない（もう合っている）
     const idle = Math.abs(su2 - 1) < 0.03 && Math.abs(sv - 1) < 0.03 && Math.abs(uT - uA) < 4 && Math.abs(vT - vA) < 4;
     if (idle && !byMain) return null;
-    return idle ? { su: 1, sv: 1, uA, uT: uA, vA, vT: vA, locked: byMain, idle: true } : { su: su2, sv, uA, uT, vA, vT, locked: byMain };
+    return idle ? { su: 1, sv: 1, uA, uT: uA, vA, vT: vA, locked: byMain, idle: true, dbg } : { su: su2, sv, uA, uT, vA, vT, locked: byMain, dbg };
   });
 }
 
@@ -950,7 +954,7 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
   }
 
   // 第1段階：各自の絵を、見本の同じパートの範囲に合わせる。t = 0：描いたまま、t = 1：合わせた形
-  let regs = null, lockedParts = [];
+  let regs = null, lockedParts = [], regInfo = null;
   function composeReg(t) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
@@ -1081,6 +1085,7 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
     // 第1段階：見本の範囲に合わせる（見本があるときだけ）
     regs = targets ? registration(layout, layers, targets) : null;
     lockedParts = regs ? regs.map((g) => !!(g && g.locked)) : [];
+    regInfo = regs ? regs.map((g) => (g ? { ...g.dbg, su: +g.su.toFixed(2), sv: +g.sv.toFixed(2), idle: !!g.idle } : null)) : null; // 確認用
     if (regs && regs.some((g) => g && !g.idle)) {
       const began1 = Date.now();
       const regFrame = () => {
@@ -1109,7 +1114,7 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
       amount = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2;
       compose(amount, raw < 1);
       if (raw < 1) { timer = setTimeout(fitFrame, 16); return; }
-      if (hooks.onDone) hooks.onDone({ score: result.score, scores: result.scores, joints: result.joints, fit: result.fit });
+      if (hooks.onDone) hooks.onDone({ score: result.score, scores: result.scores, joints: result.joints, fit: result.fit, regInfo, hasTargets: !!targets });
     };
     timer = setTimeout(fitFrame, wait);
   }

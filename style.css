@@ -362,3 +362,6 @@ button { font-family: var(--body); cursor: pointer; -webkit-tap-highlight-color:
 @keyframes jackpot-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes jackpot-out { from { opacity: 1; } to { opacity: 0; } }
 @keyframes jackpot-pop { from { opacity: 0; scale: .2; } to { opacity: 1; scale: 1; } }
+
+/* 確認用（?debug）：合体でどの方法を使ったかの表示 */
+.dbg { max-width: 760px; margin: 12px auto 0; padding: 10px 12px; background: rgba(255, 255, 255, .92); color: #1a1f3c; border-radius: 10px; font: 12px/1.6 ui-monospace, monospace; text-align: left; white-space: pre-wrap; word-break: break-all; }

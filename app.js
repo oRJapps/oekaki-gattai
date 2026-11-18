@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261118163135';
-import { loadSample, loadAlternates } from './samples.js?v=20261118163135';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers } from './draw.js?v=20261118163135';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261118163135';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261118163135';
-import { makeCard } from './card.js?v=20261118163135';
-import * as net from './net.js?v=20261118163135';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261118164841';
+import { loadSample, loadAlternates } from './samples.js?v=20261118164841';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers } from './draw.js?v=20261118164841';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261118164841';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261118164841';
+import { makeCard } from './card.js?v=20261118164841';
+import * as net from './net.js?v=20261118164841';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -968,7 +968,7 @@ function revealScreen() {
     h('button', { class: 'btn ghost', onclick: () => { stopReveal(); if (!r.solo) leaveRoom(); titleScreen(); } }, icon('home'), 'やめる'));
   const easel = easelFor(canvas, G.layout.w / G.layout.h, true);
   if (sampleBox) easel.append(sampleBox);
-  show('reveal', board(r.topic, true), status, scoreBox, scoreNote, easel, caption, buttons);
+  show('reveal', board(r.topic, true), status, scoreBox, scoreNote, easel, caption, buttons, DEBUG ? h('pre', { class: 'dbg', id: 'dbg' }, '') : null);
   sfx('merge');
   // 合体が終わったら：見本とくらべて点数を出す
   const finish = (result) => {
@@ -1023,6 +1023,7 @@ function revealScreen() {
       scoreNote.textContent = joint + `自己ベスト：${best}点`;
     }
     makeBlob().then((blob) => { cardBlob = blob; }).catch(() => {});
+    if (DEBUG) showDebug(result);
   };
   // 特別な演出：90点以上は花火と効果音。100点は全画面の演出（終わったら花火）。点数を数え終わってから出す
   // 確認用：アドレスに ?fx=90 や ?fx=100 をつけると、点数に関係なく演出だけを出せる（点数と記録は変わらない）
@@ -1035,6 +1036,32 @@ function revealScreen() {
     const boom = () => { if (G.round === r && G.phase === 'reveal') { sfx('fireworks'); fireworks(); } };
     if (level >= 100) { sfx('jackpot'); jackpot(G.reveal.toCanvas(), boom); }
     else if (level >= 90) boom();
+  };
+  // 確認用（アドレスに ?debug をつけたときだけ）：合体でどの方法を使ったかを、絵の下に文字で出す。
+  // 「この回のデータを保存」で、描いた線のデータをファイルにできる（ずれの原因を、同じ絵で調べるため）
+  const showDebug = (result) => {
+    const ver = new URL(import.meta.url).searchParams.get('v') || '（なし）';
+    const span = (x) => (x ? `${Math.round(x[0])}〜${Math.round(x[1])}` : 'なし');
+    const lines = [`版：${ver}`, `お題：${r.topic}／分け方：${G.layout.id}／人数：${r.count}／自分のパート：${r.myPart}${r.solo ? '（シングル）' : ''}`, `見本の読みこみ：${result.hasTargets ? 'できた' : 'できていない'}`];
+    (result.regInfo || []).forEach((g, i) => {
+      if (!g) { lines.push(`パート${i}：動かしていない`); return; }
+      lines.push(`パート${i}：方法＝${g.how}${g.idle ? '（もう合っていた）' : ''}　自分の体＝${span(g.ub)}　見本の体＝${span(g.tb)}　合わせた範囲＝${span(g.from)} → ${span(g.to)}　倍率＝横${g.su}・たて${g.sv}　すきま＝${g.gap || 0}`);
+      lines.push(`　　絵の範囲＝${g.A.join(',')}　見本の範囲＝${g.T.join(',')}${g.P === undefined ? '' : `　つなぎめに届く範囲＝${span(g.P)}`}`);
+    });
+    (result.joints || []).forEach((j, k) => {
+      lines.push(`つなぎめ${k}：手前＝${span([j.A.a, j.A.b])}　向こう＝${span([j.B.a, j.B.b])}　大きさを変えない＝${j.locked ? 'はい' : 'いいえ'}　細かい合わせ＝${j.warp || 'なし'}　目印＝${(j.mA || []).map(Math.round).join(',')}｜${(j.mB || []).map(Math.round).join(',')}`);
+    });
+    const box = document.getElementById('dbg');
+    if (!box) return;
+    box.textContent = lines.join('\n');
+    const save = h('button', { class: 'btn ghost', onclick: () => {
+      const data = { v: ver, topic: r.topic, layout: G.layout.id, count: r.count, myPart: r.myPart, solo: !!r.solo, parts };
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+      a.download = `oekaki-round-${Date.now()}.json`;
+      a.click();
+    } }, 'この回のデータを保存');
+    box.after(save);
   };
   const begin = () => {
     if (G.round !== r || G.phase !== 'reveal') return; // 読みこみの間に、ほかの画面へ行っていた
