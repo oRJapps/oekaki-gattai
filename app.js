@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119165041';
-import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261119165041';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks } from './draw.js?v=20261119165041';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119165041';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119165041';
-import { makeCard } from './card.js?v=20261119165041';
-import * as net from './net.js?v=20261119165041';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119165300';
+import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261119165300';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks } from './draw.js?v=20261119165300';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119165300';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119165300';
+import { makeCard } from './card.js?v=20261119165300';
+import * as net from './net.js?v=20261119165300';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -24,6 +24,8 @@ const SIMPLE_MERGE = true;
 const USE_BOX = false;
 // つなぎめの〇。true：描く画面のつなぎめに〇を2つ出して、合体のときに、絵のはしを〇に合わせる
 const USE_MARKS = true;
+// 初級（子ども向け）：お手本を、色つきのまま、描いている間もずっと出す。ほかの難易度：最初の2秒だけ、シルエットで出す
+const keepSample = () => G.level === 'A';
 const SAMPLE_MS = 2000; // お手本（シルエット）を見せる時間。最初のこの間だけ見える
 const SITE_URL = 'https://orjapps.github.io/oekaki-gattai/'; // シェアするときに入れる公開先
 // スマホかタブレットなら true（iPad は Mac と名のるので、タッチできるかどうかも見る）
@@ -752,13 +754,13 @@ function introScreen() {
   // お手本：最初の2秒だけ、シルエット（黒い影）で見せる。組み合わせお題では、ことばに合った飾りつきの絵
   const parsed = parseTopic(r.topic) || { base: r.topic, mod: '' };
   const modelCv = h('canvas', { width: 10, height: 10 });
-  const model = h('figure', { class: 'intro-sample', id: 'intro-sample', hidden: true }, modelCv, h('figcaption', {}, 'おてほん（2秒で消えます）'));
+  const model = h('figure', { class: 'intro-sample', id: 'intro-sample', hidden: true }, modelCv, h('figcaption', {}, keepSample() ? 'おてほん' : 'おてほん（2秒で消えます）'));
   loadSample(parsed.base, sampleFile(parsed.base), sampleFlip(parsed.base), parsed.mod, topicDir(parsed.base) === '左向き').then((ops) => {
     if (!ops || G.round !== r || G.phase !== 'intro') return;
     drawSample(modelCv, ops, 360);
-    silhouette(modelCv);
+    if (!keepSample()) silhouette(modelCv);
     model.hidden = false;
-    later(() => { model.style.visibility = 'hidden'; }, SAMPLE_MS); // 場所はあけたままにする（画面がガタッと動かないように）
+    if (!keepSample()) later(() => { model.style.visibility = 'hidden'; }, SAMPLE_MS); // 場所はあけたままにする（画面がガタッと動かないように）
   });
   sfx('topic');
   show('intro-' + r.myPart,
@@ -770,7 +772,7 @@ function introScreen() {
         h('p', { class: 'note', id: 'layout-name' }, `分け方：${LAYOUT_NAMES[G.layout.id]}（${r.count}つに分ける）`))),
     h('div', { class: 'fuse', 'aria-hidden': 'true' }, h('i', { style: `animation-duration:${INTRO_MS}ms` })),
     h('p', { class: 'note' }, r.solo ? 'もう片方は、CPUが描きます（合体まで見えません）' : 'ほかのパートは、合体まで見えません'),
-    h('p', { class: 'note tip' }, 'お手本の形をよく見ておぼえよう。絵のはしを、金色の点線の上の2つの〇に合わせると、となりの絵とつながります'),
+    h('p', { class: 'note tip' }, (keepSample() ? 'お手本は、描いている間も見られます。' : 'お手本の形をよく見ておぼえよう。') + '絵のはしを、金色の点線の上の2つの〇に合わせると、となりの絵とつながります'),
   );
   later(drawScreen, INTRO_MS);
 }
@@ -841,10 +843,23 @@ function drawScreen() {
     if (left <= 0) submitPart();
   };
 
+  // 初級：お手本を、色つきのまま、ずっと出しておく（押すと大きくなる）
+  let guide = null;
+  if (keepSample()) {
+    const guideCv = h('canvas', { width: 10, height: 10 });
+    guide = h('figure', { class: 'sample', id: 'draw-sample', hidden: true, title: '押すと大きくなる', onclick: (e) => e.currentTarget.classList.toggle('big') }, guideCv, h('figcaption', {}, 'おてほん'));
+    const parsed = parseTopic(r.topic) || { base: r.topic, mod: '' };
+    loadSample(parsed.base, sampleFile(parsed.base), sampleFlip(parsed.base), parsed.mod, topicDir(parsed.base) === '左向き').then((ops) => {
+      if (!ops || G.round !== r || G.pad !== pad) return;
+      drawSample(guideCv, ops, 300);
+      guide.hidden = false;
+    });
+  }
   const b = regs[r.myPart].bbox;
   show('draw-' + r.myPart,
     board(r.topic, true),
     h('div', { class: 'row' }, h('span', { class: 'chip gold' }, `あなたは「${regs[r.myPart].label}」`), clock),
+    guide,
     easelFor(canvas, b.w / b.h),
     h('div', { class: 'tools' },
       h('div', { class: 'toolrow' }, toolButtons),
