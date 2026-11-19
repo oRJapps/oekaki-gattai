@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119165300';
-import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261119165300';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks } from './draw.js?v=20261119165300';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119165300';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119165300';
-import { makeCard } from './card.js?v=20261119165300';
-import * as net from './net.js?v=20261119165300';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119165916';
+import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261119165916';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks } from './draw.js?v=20261119165916';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119165916';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119165916';
+import { makeCard } from './card.js?v=20261119165916';
+import * as net from './net.js?v=20261119165916';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -26,6 +26,8 @@ const USE_BOX = false;
 const USE_MARKS = true;
 // 初級（子ども向け）：お手本を、色つきのまま、描いている間もずっと出す。ほかの難易度：最初の2秒だけ、シルエットで出す
 const keepSample = () => G.level === 'A';
+// 激辛：お手本を出さない（お題の画面でも、描く画面でも）。お題は上級と同じ
+const noSample = () => G.level === 'D';
 const SAMPLE_MS = 2000; // お手本（シルエット）を見せる時間。最初のこの間だけ見える
 const SITE_URL = 'https://orjapps.github.io/oekaki-gattai/'; // シェアするときに入れる公開先
 // スマホかタブレットなら true（iPad は Mac と名のるので、タッチできるかどうかも見る）
@@ -239,7 +241,7 @@ function titleScreen() {
 
 // ---------- 画面：難易度 A/B/C ----------
 // next：single = CPUと合体 ／ online = オンラインの部屋へ ／ friend = 部屋を作ってカギを発行
-const LEVEL_LOOK = { A: ['#3ddc84', 'rows', 1], B: ['#ff9a3c', 'diag', 2], C: ['#ff5252', 'diagR', 3] };
+const LEVEL_LOOK = { A: ['#3ddc84', 'rows', 1], B: ['#ff9a3c', 'diag', 2], C: ['#ff5252', 'diagR', 3], D: ['#b5179e', 'diagR', 4] };
 function levelScreen(next) {
   const title = { single: 'シングル', online: '対戦', friend: '部屋を作る' }[next];
   show('level-' + next,
@@ -249,7 +251,7 @@ function levelScreen(next) {
       const art = h('canvas', { class: 'mini' });
       drawLayoutPreview(art, makeLayout(layout, 2), 0);
       return card(color, art, lv.label, lv.hint, () => chooseLevel(next, key),
-        h('span', { class: 'stars', 'aria-label': `むずかしさ ${stars}` }, '★'.repeat(stars), h('i', {}, '★'.repeat(3 - stars))));
+        h('span', { class: 'stars', 'aria-label': `むずかしさ ${stars}` }, '★'.repeat(stars), h('i', {}, '★'.repeat(Math.max(0, 3 - stars)))));
     })),
     backButton(next === 'friend' ? friendScreen : titleScreen),
   );
@@ -316,7 +318,7 @@ async function openRoom(next, level, size, code) {
     sfx('error');
     const text = String((err && err.message) || err);
     if (/key in use/.test(text)) { setupScreen(next, level, { size, code, error: 'そのカギは、いまほかの部屋で使われています。別の数字にしてね' }); return; }
-    toast('部屋に入れませんでした：' + text);
+    toast(level === 'D' ? '激辛の部屋は、まだ作れません（Supabase の設定の更新が必要です）' : '部屋に入れませんでした：' + text);
     titleScreen();
   }
 }
@@ -582,7 +584,7 @@ function validStart(d, from) {
   const ids = d.order.map((o) => (o && typeof o.id === 'string' ? o.id : ''));
   if (new Set(ids).size !== ids.length || !ids.every((id) => G.keys.has(id)) || !ids.includes(from)) return false;
   const parsed = parseTopic(d.topic); // お題は、決まった一覧（と、決まったことばの組み合わせ）の中だけ
-  if (!parsed || parsed.level !== G.room.difficulty) return false;
+  if (!parsed || parsed.level !== (G.room.difficulty === 'D' ? 'C' : G.room.difficulty)) return false; // 激辛のお題は、上級と同じ
   if (!layoutsFor(d.count).includes(d.layout)) return false;
   if (G.room.size && d.count !== cap()) return false; // 決めた人数で分ける
   return Number.isInteger(d.seconds) && d.seconds >= 5 && d.seconds <= 600;
@@ -755,7 +757,7 @@ function introScreen() {
   const parsed = parseTopic(r.topic) || { base: r.topic, mod: '' };
   const modelCv = h('canvas', { width: 10, height: 10 });
   const model = h('figure', { class: 'intro-sample', id: 'intro-sample', hidden: true }, modelCv, h('figcaption', {}, keepSample() ? 'おてほん' : 'おてほん（2秒で消えます）'));
-  loadSample(parsed.base, sampleFile(parsed.base), sampleFlip(parsed.base), parsed.mod, topicDir(parsed.base) === '左向き').then((ops) => {
+  if (!noSample()) loadSample(parsed.base, sampleFile(parsed.base), sampleFlip(parsed.base), parsed.mod, topicDir(parsed.base) === '左向き').then((ops) => {
     if (!ops || G.round !== r || G.phase !== 'intro') return;
     drawSample(modelCv, ops, 360);
     if (!keepSample()) silhouette(modelCv);
@@ -772,7 +774,7 @@ function introScreen() {
         h('p', { class: 'note', id: 'layout-name' }, `分け方：${LAYOUT_NAMES[G.layout.id]}（${r.count}つに分ける）`))),
     h('div', { class: 'fuse', 'aria-hidden': 'true' }, h('i', { style: `animation-duration:${INTRO_MS}ms` })),
     h('p', { class: 'note' }, r.solo ? 'もう片方は、CPUが描きます（合体まで見えません）' : 'ほかのパートは、合体まで見えません'),
-    h('p', { class: 'note tip' }, (keepSample() ? 'お手本は、描いている間も見られます。' : 'お手本の形をよく見ておぼえよう。') + '絵のはしを、金色の点線の上の2つの〇に合わせると、となりの絵とつながります'),
+    h('p', { class: 'note tip' }, (keepSample() ? 'お手本は、描いている間も見られます。' : noSample() ? '激辛：お手本は出ません。' : 'お手本の形をよく見ておぼえよう。') + '絵のはしを、金色の点線の上の2つの〇に合わせると、となりの絵とつながります'),
   );
   later(drawScreen, INTRO_MS);
 }
@@ -929,11 +931,12 @@ function checkAllParts() {
 
 // 点数（合体スコア）：合体した絵から4つの数値（接続 C・カラフル V・描きこみ D・バランス B）を出して、難易度ごとの重みで足す。
 // 見本とはくらべない。重みは、合わせて 1 になるようにする。
-//   初級：描きこみとバランス（がんばって描いたか）を重く。上級：接続（つなぎめが合っているか）を重く
+//   初級：描きこみとバランス（がんばって描いたか）を重く。上級：接続（つなぎめが合っているか）を重く。激辛：描きこみとバランスを重く
 const SCORE_WEIGHTS = {
   A: { C: 0.20, V: 0.20, D: 0.30, B: 0.30 },
   B: { C: 0.35, V: 0.25, D: 0.20, B: 0.20 },
   C: { C: 0.50, V: 0.20, D: 0.15, B: 0.15 },
+  D: { C: 0.30, V: 0.10, D: 0.30, B: 0.30 }, // 激辛：描きこみとバランスを重く見る
 };
 const BEST_KEY = 'oekaki_best_score2';
 function rankWord(score) {

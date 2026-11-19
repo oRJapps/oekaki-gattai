@@ -15,7 +15,7 @@ create table if not exists public.rooms (
   id uuid primary key default gen_random_uuid(),
   code text,                                  -- フレンド用のカギ（4けた）。対戦の部屋は null
   mode text not null check (mode in ('online', 'friend')),
-  difficulty text not null check (difficulty in ('A', 'B', 'C')),   -- A=初級 B=中級 C=上級
+  difficulty text not null check (difficulty in ('A', 'B', 'C')),   -- A=初級 B=中級 C=上級（D=激辛は、下の alter で足す）
   status text not null default 'waiting' check (status in ('waiting', 'playing')),
   player_count int not null default 1,
   host_id text,
@@ -26,6 +26,9 @@ create table if not exists public.rooms (
 alter table public.rooms add column if not exists size int not null default 5;      -- この部屋の人数（2〜5）
 alter table public.rooms add column if not exists host_secret text;   -- 部屋を作った人だけが知る合言葉
 alter table public.rooms alter column host_id drop not null;          -- v1 の列。もう使わない
+-- 難易度に D（激辛）を足す
+alter table public.rooms drop constraint if exists rooms_difficulty_check;
+alter table public.rooms add constraint rooms_difficulty_check check (difficulty in ('A', 'B', 'C', 'D'));
 
 create index if not exists rooms_match_idx on public.rooms (mode, difficulty, status, updated_at);
 create index if not exists rooms_code_idx on public.rooms (code);
@@ -101,7 +104,7 @@ declare
   v_size int := least(5, greatest(2, coalesce(p_size, 5)));
 begin
   if p_mode is null or p_difficulty is null
-     or p_mode not in ('online', 'friend') or p_difficulty not in ('A', 'B', 'C') then
+     or p_mode not in ('online', 'friend') or p_difficulty not in ('A', 'B', 'C', 'D') then
     raise exception 'bad arguments';
   end if;
   if v_ip = 'unknown' then v_limit := 300; end if;

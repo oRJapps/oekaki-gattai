@@ -8,6 +8,7 @@ export const LEVELS = {
   A: { label: '初級', hint: '食べ物・かんたんな形のもの' },
   B: { label: '中級', hint: '動物・身近なもの' },
   C: { label: '上級', hint: '乗り物・建物など形が複雑なもの' },
+  D: { label: '激辛', hint: 'お手本なし。上級のお題を、何も見ずに描く' },
 };
 
 // [見本のファイル名, 種類, 難易度, お題…]
@@ -56,6 +57,8 @@ for (const [file, kind, level, ...names] of GROUPS) {
   }
 }
 
+TOPICS.D = TOPICS.C; // 激辛：お題は上級と同じ（お手本が出ないだけ）
+
 // 横に長いお題。3人以上で遊ぶとき、これらは左右にならべ、ほかのお題は上下にならべる
 export const WIDE_TOPICS = new Set(['バナナ', '魚', 'ヘビ', '自動車', '電車', '自転車', '飛行機', '恐竜', '消防車', 'ドラゴン', 'ピアノ',
   'きゅうり', 'とうもろこし', 'えびフライ', 'のり巻き', 'たい焼き', '鉛筆', '鍵', '眼鏡', '虹', 'かたつむり', 'カメ', '金魚',
@@ -84,7 +87,7 @@ const HAS_NECK = new Set(['ネコ', 'イヌ', 'ウサギ', 'クマ', 'パンダ'
 const modFits = (mod, base) => !NECK_MODS.has(mod) || HAS_NECK.has(base);
 
 // 組み合わせお題が出る割合（難易度ごと）
-const COMBO_RATE = { A: 0.2, B: 0.35, C: 0.45 };
+const COMBO_RATE = { A: 0.2, B: 0.35, C: 0.45, D: 0.45 };
 const XMAS = /サンタ|クリスマス|雪/, HALLOWEEN = /ハロウィン|魔女|お化け/;
 
 export function pick(list) {
