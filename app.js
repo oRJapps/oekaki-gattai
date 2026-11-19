@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119164350';
-import { loadSample, loadAlternates } from './samples.js?v=20261119164350';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks } from './draw.js?v=20261119164350';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119164350';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119164350';
-import { makeCard } from './card.js?v=20261119164350';
-import * as net from './net.js?v=20261119164350';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119164801';
+import { loadSample, loadAlternates } from './samples.js?v=20261119164801';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks } from './draw.js?v=20261119164801';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119164801';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119164801';
+import { makeCard } from './card.js?v=20261119164801';
+import * as net from './net.js?v=20261119164801';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -985,8 +985,7 @@ function revealScreen() {
     h('button', { class: 'btn primary', id: 'again-btn', onclick: () => { stopReveal(); if (r.solo) startSolo(); else lobbyScreen(); } }, icon('again'), 'もう一回'),
     h('button', { class: 'btn ghost', onclick: () => { stopReveal(); if (!r.solo) leaveRoom(); titleScreen(); } }, icon('home'), 'やめる'));
   const easel = easelFor(canvas, G.layout.w / G.layout.h, true);
-  if (sampleBox) easel.append(sampleBox);
-  show('reveal', board(r.topic, true), status, scoreBox, scoreNote, easel, caption, buttons, DEBUG ? h('pre', { class: 'dbg', id: 'dbg' }, '') : null);
+  show('reveal', board(r.topic, true), status, scoreBox, scoreNote, easel, sampleBox, caption, buttons, DEBUG ? h('pre', { class: 'dbg', id: 'dbg' }, '') : null);
   sfx('merge');
   // 合体が終わったら：見本とくらべて点数を出す
   const finish = (result) => {

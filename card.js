@@ -83,7 +83,9 @@ export async function makeCard(drawing, topic, credits, extra = {}) {
   // 絵をはる紙の大きさ：横は 860 まで、たては 1500 まで。絵の形はそのまま
   const scale = Math.min(860 / drawing.width, 1500 / drawing.height, 780 / Math.min(drawing.width, drawing.height));
   const pw = Math.round(drawing.width * scale), ph = Math.round(drawing.height * scale);
-  const py = 420, px = (W - pw) / 2, pad = 16;
+  // 見本があるときは、お題と絵の間に「見本と点数の段」を作る（絵に重ならないように）
+  const rowH = extra.sample ? 250 : 0;
+  const py = 420 + rowH, px = (W - pw) / 2, pad = 16;
   const H = py + ph + 150;
 
   const cv = document.createElement('canvas');
@@ -128,9 +130,9 @@ export async function makeCard(drawing, topic, credits, extra = {}) {
   roundRect(c, W / 2 - 62, py - pad - 20, 124, 34, 10); c.fillStyle = PINK; c.fill();
   c.lineWidth = 6; c.strokeStyle = INK; c.stroke();
 
-  // 左上：見本（おてほん）。紙の角に、少しはみ出してはる
+  // 見本（おてほん）：お題の下、絵の上の段の左がわ
   if (extra.sample) {
-    const ss = 160, sx = Math.max(14, px - pad - 30), sy = py - pad - 6;
+    const ss = 160, sx = 110, sy = 392;
     c.save();
     c.translate(sx + ss / 2, sy + ss / 2);
     c.rotate(-0.05);
@@ -146,7 +148,8 @@ export async function makeCard(drawing, topic, credits, extra = {}) {
   // 右上：点数
   if (typeof extra.score === 'number') {
     c.save();
-    c.translate(Math.min(W - 150, px + pw + pad - 110), py - pad + 24);
+    if (extra.sample) c.translate(W - 270, 392 + 96); // 見本と同じ段の右がわ
+    else c.translate(Math.min(W - 150, px + pw + pad - 110), py - pad + 24);
     c.rotate(0.07);
     roundRect(c, -150, -52 + 8, 300, 104, 22); c.fillStyle = INK; c.fill();
     roundRect(c, -150, -52, 300, 104, 22); c.fillStyle = GOLD; c.fill();
