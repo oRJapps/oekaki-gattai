@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119165916';
-import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261119165916';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks } from './draw.js?v=20261119165916';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119165916';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119165916';
-import { makeCard } from './card.js?v=20261119165916';
-import * as net from './net.js?v=20261119165916';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119170138';
+import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261119170138';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks } from './draw.js?v=20261119170138';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119170138';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119170138';
+import { makeCard } from './card.js?v=20261119170138';
+import * as net from './net.js?v=20261119170138';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -203,7 +203,7 @@ function saveName(name) {
   me.name = me.typed || GUEST_NAME;
   try { localStorage.setItem(NAME_KEY, me.typed); } catch (e) { /* なくてもよい */ }
 }
-const modeLabel = () => ({ single: 'シングル', online: '対戦', friend: 'フレンド' }[G.mode]);
+const modeLabel = () => ({ single: 'シングル', online: '対戦', friend: 'フレンド', local: 'みんなで' }[G.mode]);
 const backButton = (fn) => h('button', { class: 'btn ghost', onclick: () => { sfx('back'); fn(); } }, icon('back'), 'もどる');
 const head = (title, sub) => h('header', { class: 'head' }, h('h2', { class: 'ribbon' }, title), sub ? h('p', { class: 'lead' }, sub) : null);
 // 大きなメニューのカード（色、絵、タイトル、説明）
@@ -232,7 +232,8 @@ function titleScreen() {
     h('nav', { class: 'menu' },
       card('#ff5d8f', icon('pen'), 'シングル', 'CPUと合体する', go(() => levelScreen('single'))),
       card('#3ec5ff', icon('people'), '対戦', '難易度と人数を選ぶと部屋に入る', go(() => levelScreen('online'))),
-      card('#3ddc84', icon('key'), 'フレンド', 'カギで集まる', go(friendScreen))),
+      card('#3ddc84', icon('key'), 'フレンド', 'カギで集まる', go(friendScreen)),
+      card('#ffc928', icon('people'), 'みんなで', '1台を順番に回して描く', go(() => levelScreen('local')))),
     h('p', { class: 'status ' + (net.online ? 'on' : 'off') }, h('i', {}),
       net.online ? 'オンライン：みんなとつながります' : 'お試しモード：同じブラウザの別タブ同士だけつながります'),
   );
@@ -240,10 +241,10 @@ function titleScreen() {
 }
 
 // ---------- 画面：難易度 A/B/C ----------
-// next：single = CPUと合体 ／ online = オンラインの部屋へ ／ friend = 部屋を作ってカギを発行
+// next：single = CPUと合体 ／ online = オンラインの部屋へ ／ friend = 部屋を作ってカギを発行 ／ local = 1台を順番に回して描く
 const LEVEL_LOOK = { A: ['#3ddc84', 'rows', 1], B: ['#ff9a3c', 'diag', 2], C: ['#ff5252', 'diagR', 3], D: ['#b5179e', 'diagR', 4] };
 function levelScreen(next) {
-  const title = { single: 'シングル', online: '対戦', friend: '部屋を作る' }[next];
+  const title = { single: 'シングル', online: '対戦', friend: '部屋を作る', local: 'みんなで' }[next];
   show('level-' + next,
     head(title, '難易度をえらぼう'),
     h('nav', { class: 'menu' }, Object.entries(LEVELS).map(([key, lv]) => {
@@ -279,7 +280,7 @@ function setupScreen(next, level, keep = {}) {
   const input = next === 'friend'
     ? h('input', { class: 'input key', id: 'new-key', inputmode: 'numeric', maxlength: 4, placeholder: '0000', autocomplete: 'off', 'aria-label': 'カギ', value: keep.code || '' }) : null;
   const msg = h('p', { class: 'note', role: 'status' }, keep.error
-    || (input ? '好きな4けたの数字をカギにしてね。友だちには、この数字を教える' : '同じ人数をえらんだ人と、同じ部屋になります'));
+    || (input ? '好きな4けたの数字をカギにしてね。友だちには、この数字を教える' : next === 'local' ? '1台を、順番に回して描きます。ほかの人が描いている間は、画面を見ないでね' : '同じ人数をえらんだ人と、同じ部屋になります'));
   const go = () => {
     const size = readSize();
     if (!size) { sfx('error'); msg.textContent = `人数は2〜${MAX_PLAYERS}の半角数字で入れてね`; sizeInput.focus(); return; }
@@ -288,16 +289,17 @@ function setupScreen(next, level, keep = {}) {
       code = input.value.replace(/\D/g, '');
       if (code.length !== KEY_LENGTH) { sfx('error'); msg.textContent = `カギは${KEY_LENGTH}けたの数字にしてね`; return; }
     }
+    if (next === 'local') { G.level = level; G.mode = 'local'; startLocal(size); return; } // 1台で遊ぶ：部屋は作らない
     openRoom(next, level, size, code);
   };
   [sizeInput, input].forEach((el) => { if (el) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); }); });
   show('setup-' + next,
-    head(next === 'friend' ? '部屋を作る' : '対戦', input ? '人数とカギを決めよう' : '人数を決めよう'),
+    head(next === 'friend' ? '部屋を作る' : next === 'local' ? 'みんなで' : '対戦', input ? '人数とカギを決めよう' : '人数を決めよう'),
     h('div', { class: 'tools' }, h('p', { class: 'lead' }, `何人で遊ぶ？（2〜${MAX_PLAYERS}の半角数字）`), row, split),
     input ? h('div', { class: 'ticket' }, h('small', {}, icon('key'), 'カギ（4けた）'), input,
       h('button', { class: 'tool', onclick: () => { input.value = String(Math.floor(Math.random() * 10000)).padStart(4, '0'); } }, 'おまかせ')) : null,
     msg,
-    h('button', { class: 'btn primary', id: 'open-room', onclick: go }, input ? '部屋を作る' : '部屋に入る'),
+    h('button', { class: 'btn primary', id: 'open-room', onclick: go }, input ? '部屋を作る' : next === 'local' ? '始める' : '部屋に入る'),
     backButton(() => levelScreen(next)),
   );
 }
@@ -726,6 +728,34 @@ function startSolo() {
   });
 }
 
+// ---------- みんなで（1台を順番に回して描く） ----------
+// 通信は使わない。1人目から順番に、自分のパートだけを描く。全員が描いたら合体する
+function startLocal(count) {
+  const topic = nextTopic(G.level);
+  markTopic(topic);
+  const layout = freshLayout(G.level, count, WIDE_TOPICS.has(parseTopic(topic).base));
+  noteLayout(layout);
+  beginRound({
+    id: crypto.randomUUID(), topic, count, layout, seconds: DRAW_SECONDS, local: true, myPart: 0,
+    owners: Array.from({ length: count }, (_, i) => `${i + 1}人目`),
+  });
+}
+// 次の人に機器をわたす画面。「じゅんびOK」を押すまで、お題のほかは何も見せない
+function handoffScreen() {
+  const r = G.round;
+  clearTimers();
+  G.phase = 'handoff';
+  G.pad = null;
+  sfx('topic');
+  show('handoff-' + r.myPart,
+    head(`${r.owners[r.myPart]}の番`, r.myPart ? '次の人に、画面をわたしてね' : '最初の人から、順番に描くよ'),
+    h('p', { class: 'lead' }, `${r.myPart + 1} / ${r.count} 人目`),
+    h('p', { class: 'note' }, 'ほかの人は、画面を見ないでね。前の人の絵は、合体まで見えません'),
+    h('button', { class: 'btn primary go', id: 'handoff-ok', onclick: () => { sfx('go'); introScreen(); } }, icon('check'), 'じゅんびOK'),
+    r.myPart ? null : backButton(titleScreen),
+  );
+}
+
 // ---------- ラウンド：お題 → 描く → 合体 ----------
 function beginRound(round) {
   clearTimers();
@@ -742,7 +772,7 @@ function beginRound(round) {
   G.submitted = false;
   G.ready = false;
   G.seen = {};
-  introScreen();
+  if (round.local) handoffScreen(); else introScreen();
 }
 
 // お題と、自分が描くパートを見せる（シングルでは、2つ目のパートの前にも出る）
@@ -886,6 +916,10 @@ function submitPart() {
   sfx('done');
   G.parts[r.myPart] = ops;
   if (r.solo) { revealScreen(); return; } // シングル：すぐ合体へ（もう片方は CPU が描く）
+  if (r.local) { // みんなで：次の人へ。最後の人が描き終わったら合体
+    if (r.myPart < r.count - 1) { r.myPart++; G.submitted = false; handoffScreen(); } else revealScreen();
+    return;
+  }
   G.phase = 'wait';
   track();
   const btn = document.getElementById('done-btn');
@@ -998,8 +1032,8 @@ function revealScreen() {
     h('button', { class: 'btn', onclick: saveImage }, icon('save'), '画像を保存'),
     // スマホ：共有の一覧を出す（絵つき）。パソコン：手順の窓を出す（絵をコピー → X を開く → 貼りつけ）
     h('button', { class: 'btn share', id: 'share-btn', onclick: IS_PHONE ? sharePhone : openShareDialog }, icon('x'), 'Xでシェア'),
-    h('button', { class: 'btn primary', id: 'again-btn', onclick: () => { stopReveal(); if (r.solo) startSolo(); else lobbyScreen(); } }, icon('again'), 'もう一回'),
-    h('button', { class: 'btn ghost', onclick: () => { stopReveal(); if (!r.solo) leaveRoom(); titleScreen(); } }, icon('home'), 'やめる'));
+    h('button', { class: 'btn primary', id: 'again-btn', onclick: () => { stopReveal(); if (r.solo) startSolo(); else if (r.local) startLocal(r.count); else lobbyScreen(); } }, icon('again'), 'もう一回'),
+    h('button', { class: 'btn ghost', onclick: () => { stopReveal(); if (!r.solo && !r.local) leaveRoom(); titleScreen(); } }, icon('home'), 'やめる'));
   const easel = easelFor(canvas, G.layout.w / G.layout.h, true);
   show('reveal', board(r.topic, true), status, scoreBox, scoreNote, easel, sampleBox, caption, buttons, DEBUG ? h('pre', { class: 'dbg', id: 'dbg' }, '') : null);
   sfx('merge');
