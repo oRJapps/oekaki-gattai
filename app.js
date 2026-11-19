@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119094641';
-import { loadSample, loadAlternates } from './samples.js?v=20261119094641';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB } from './draw.js?v=20261119094641';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119094641';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119094641';
-import { makeCard } from './card.js?v=20261119094641';
-import * as net from './net.js?v=20261119094641';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119095156';
+import { loadSample, loadAlternates } from './samples.js?v=20261119095156';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB } from './draw.js?v=20261119095156';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119095156';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119095156';
+import { makeCard } from './card.js?v=20261119095156';
+import * as net from './net.js?v=20261119095156';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -31,7 +31,11 @@ const SEATS = [
   { name: '赤', color: '#ff5252' }, { name: '青', color: '#3ec5ff' },
   { name: '緑', color: '#3ddc84' }, { name: '黄', color: '#ffc928' }, { name: '紫', color: '#b388ff' },
 ];
-const COLORS = ['#1e1e1e', '#e53935', '#fb8c00', '#f9a825', '#43a047', '#1e88e5', '#8e24aa', '#ec6a9c', '#795548', '#8a8f98'];
+// 色：12色の色鉛筆と同じ並び（白い紙に描くので、白のかわりに「うすだいだい」が入るセットに合わせた）
+const COLOR_LIST = [['#e60012', 'あか'], ['#f39800', 'だいだいいろ'], ['#ffe100', 'きいろ'], ['#8fc31f', 'きみどり'], ['#009944', 'みどり'], ['#54c3f1', 'みずいろ'],
+  ['#0068b7', 'あお'], ['#8b2f97', 'むらさき'], ['#f29fbf', 'ももいろ'], ['#8a4b2a', 'ちゃいろ'], ['#f8c9a0', 'うすだいだい'], ['#1e1e1e', 'くろ']];
+const COLORS = COLOR_LIST.map(([c]) => c);
+const COLOR_NAMES = Object.fromEntries(COLOR_LIST);
 const WIDTHS = [['細', 6], ['中', 12], ['太', 26]];
 
 // id と pub（公開する鍵）と sign（署名する関数）は、最後の「はじめに1回だけ」で作る。typed = 入力したなまえ、name = 画面に出すなまえ
@@ -808,7 +812,7 @@ function drawScreen() {
     onclick: (e) => { pad.tool = id; mark(e.currentTarget, '.tool.t'); },
   }, icon(ic), name));
   const colorButtons = COLORS.map((c) => h('button', {
-    class: 'swatch' + (c === pad.color ? ' on' : ''), style: `--sw:${c}`, 'aria-label': '色 ' + c, 'aria-pressed': c === pad.color ? 'true' : 'false',
+    class: 'swatch' + (c === pad.color ? ' on' : ''), style: `--sw:${c}`, 'aria-label': '色 ' + COLOR_NAMES[c], title: COLOR_NAMES[c], 'aria-pressed': c === pad.color ? 'true' : 'false',
     onclick: (e) => {
       pad.color = c;
       mark(e.currentTarget, '.swatch');
