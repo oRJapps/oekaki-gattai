@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119172247';
-import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261119172247';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261119172247';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119172247';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119172247';
-import { makeCard } from './card.js?v=20261119172247';
-import * as net from './net.js?v=20261119172247';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119172837';
+import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261119172837';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261119172837';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119172837';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119172837';
+import { makeCard } from './card.js?v=20261119172837';
+import * as net from './net.js?v=20261119172837';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -343,9 +343,9 @@ function friendScreen() {
 
 // フレンドの部屋で遊ぶモード。min = 必要な人数
 const GAMES = {
-  gattai: { label: 'お絵かき合体モード', hint: 'お題を分けて描いて、合体する（通常）', color: '#ff5d8f', icon: 'pen', min: 2 },
-  pick: { label: 'お絵かきモード', hint: '1人がお題を決めて、ほかの人が描く', color: '#3ec5ff', icon: 'people', min: 3 },
-  shiri: { label: '絵しりとりモード', hint: '絵でしりとり。✕が出るまで続く', color: '#ffc928', icon: 'again', min: 2 },
+  gattai: { label: 'お絵かき合体', hint: 'お題を分けて描いて、合体する（通常）', color: '#ff5d8f', icon: 'pen', min: 2 },
+  pick: { label: 'お絵かき（お題決め）', hint: '1人がお題を決めて、ほかの人が描く', color: '#3ec5ff', icon: 'people', min: 3 },
+  shiri: { label: '絵しりとり', hint: '絵でしりとり。✕が出るまで続く', color: '#ffc928', icon: 'again', min: 2 },
 };
 const gameOf = () => (GAMES[G.game] ? G.game : 'gattai');
 function gameScreen() {
@@ -774,7 +774,7 @@ function pickScreen() {
   // 90秒たってもお題が決まらなければ、部屋にもどる
   later(() => { if (G.phase === 'pick' && G.ask === ask) { toast('お題が決まらなかったので、部屋にもどります'); lobbyScreen(); } }, 90000);
   if (ask.chooser !== me.id) {
-    show('pick-wait', head('お絵かきモード', 'お題を待っています'),
+    show('pick-wait', head('お絵かき（お題決め）', 'お題を待っています'),
       h('div', { class: 'loading' }, h('i', {}), h('i', {}), h('i', {})),
       h('p', { class: 'lead' }, `「${who.name}」さんが、お題を考えています…`),
       h('p', { class: 'note' }, 'お題が決まると、あなたが描くパートが出ます'));
@@ -798,7 +798,7 @@ function pickScreen() {
   };
   btn.addEventListener('click', go);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
-  show('pick', head('お絵かきモード', 'あなたがお題を決める番'),
+  show('pick', head('お絵かき（お題決め）', 'あなたがお題を決める番'),
     h('div', { class: 'ticket' }, h('small', {}, icon('pen'), 'お題'), input), msg, btn);
   input.focus();
 }
