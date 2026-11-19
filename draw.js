@@ -969,7 +969,8 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
     if (op.f || op.g) tasks.push([pi, op, -1]);
     else for (let i = 0; i < op.p.length / 2; i++) tasks.push([pi, op, i]);
   }));
-  const perFrame = Math.max(3, Math.ceil(tasks.length / 200)); // 描くところは全体で約3秒
+  // hooks.instant：描くところ（消しゴムで消すところもふくむ）を見せない。できあがった絵を、いきなり出す
+  const perFrame = hooks.instant ? Infinity : Math.max(3, Math.ceil(tasks.length / 200)); // 見せるときは、全体で約3秒
   const f = layout.frame;
   let k = 0, timer = null, stopped = false, result = null, amount = 0;
 
@@ -1141,7 +1142,7 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
         if (stopped) return;
         compose(1, false);
         if (hooks.onDone) hooks.onDone({ score: result.score, scores: result.scores, joints: result.joints, fit: result.fit, regInfo: null, hasTargets: !!targets, simple: true });
-      }, 500);
+      }, hooks.instant ? 900 : 500);
       return;
     }
     if (hooks.onFit) hooks.onFit();

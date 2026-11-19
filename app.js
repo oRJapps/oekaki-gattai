@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261118175347';
-import { loadSample, loadAlternates } from './samples.js?v=20261118175347';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB } from './draw.js?v=20261118175347';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261118175347';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261118175347';
-import { makeCard } from './card.js?v=20261118175347';
-import * as net from './net.js?v=20261118175347';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119094641';
+import { loadSample, loadAlternates } from './samples.js?v=20261119094641';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB } from './draw.js?v=20261119094641';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119094641';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119094641';
+import { makeCard } from './card.js?v=20261119094641';
+import * as net from './net.js?v=20261119094641';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -1066,6 +1066,7 @@ function revealScreen() {
     if (G.round !== r || G.phase !== 'reveal') return; // 読みこみの間に、ほかの画面へ行っていた
     G.reveal = startReveal(canvas, G.layout, parts, {
       simple: SIMPLE_MERGE,
+      instant: true, // 描くところ（消しゴム・やり直し）は見せない。できあがった絵だけを合体する
       limit: USE_BOX, // 描いたときと同じにする（四角を使わないなら、合体でも使わない）
       targets,
       cpuPart: r.solo ? 1 - r.myPart : undefined, // シングル：CPU のパート（見本そのもの）
