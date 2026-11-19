@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119103051';
-import { loadSample, loadAlternates } from './samples.js?v=20261119103051';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB } from './draw.js?v=20261119103051';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119103051';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119103051';
-import { makeCard } from './card.js?v=20261119103051';
-import * as net from './net.js?v=20261119103051';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119164350';
+import { loadSample, loadAlternates } from './samples.js?v=20261119164350';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks } from './draw.js?v=20261119164350';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119164350';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119164350';
+import { makeCard } from './card.js?v=20261119164350';
+import * as net from './net.js?v=20261119164350';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -22,6 +22,8 @@ const INTRO_MS = 4000; // お題と、自分が描くパートを見せる時間
 const SIMPLE_MERGE = true;
 // 描く画面の「描ける範囲の四角」。false：四角を出さない。パートの中なら、どこにでも描ける
 const USE_BOX = false;
+// つなぎめの〇。true：描く画面のつなぎめに〇を2つ出して、合体のときに、絵のはしを〇に合わせる
+const USE_MARKS = true;
 const SAMPLE_MS = 2000; // お手本（シルエット）を見せる時間。最初のこの間だけ見える
 const SITE_URL = 'https://orjapps.github.io/oekaki-gattai/'; // シェアするときに入れる公開先
 // スマホかタブレットなら true（iPad は Mac と名のるので、タッチできるかどうかも見る）
@@ -770,7 +772,7 @@ function introScreen() {
         h('p', { class: 'note', id: 'layout-name' }, `分け方：${LAYOUT_NAMES[G.layout.id]}（${r.count}つに分ける）`))),
     h('div', { class: 'fuse', 'aria-hidden': 'true' }, h('i', { style: `animation-duration:${INTRO_MS}ms` })),
     h('p', { class: 'note' }, r.solo ? 'もう片方は、CPUが描きます（合体まで見えません）' : 'ほかのパートは、合体まで見えません'),
-    h('p', { class: 'note tip' }, 'お手本の形をよく見ておぼえよう。金色の点線まで線をのばすと、となりの絵とつながります'),
+    h('p', { class: 'note tip' }, 'お手本の形をよく見ておぼえよう。絵のはしを、金色の点線の上の2つの〇に合わせると、となりの絵とつながります'),
   );
   later(drawScreen, INTRO_MS);
 }
@@ -799,6 +801,7 @@ function drawScreen() {
   r.targets.then((t) => {
     const mine = t && t[r.myPart];
     if (USE_BOX && G.round === r && G.pad === pad && mine && mine.box) pad.setLimit(mine.box);
+    if (USE_MARKS && G.round === r && G.pad === pad) pad.setMarks(seamMarks(G.layout, t)); // つなぎめの〇
   });
 
   function mark(el, group) {
@@ -851,7 +854,7 @@ function drawScreen() {
       h('div', { class: 'toolrow' }, widthButtons,
         h('button', { class: 'tool', onclick: () => pad.undo() }, icon('undo'), '1つもどす'),
         h('button', { class: 'tool', onclick: () => pad.clear() }, icon('trash'), '全部消す'))),
-    h('p', { class: 'note', id: 'wait-text', role: 'status' }, (USE_BOX ? '明るい四角の中に描こう。' : '') + '金色の点線が、となりの絵とのつなぎめ。線を点線までのばそう'),
+    h('p', { class: 'note', id: 'wait-text', role: 'status' }, (USE_BOX ? '明るい四角の中に描こう。' : '') + (USE_MARKS ? '金色の点線が、となりの絵とのつなぎめ。絵のはしを、2つの〇に合わせよう' : '金色の点線が、となりの絵とのつなぎめ。線を点線までのばそう')),
     h('button', { class: 'btn primary go', id: 'done-btn', onclick: submitPart }, icon('check'), 'できた！'),
   );
   tick();
@@ -1070,6 +1073,7 @@ function revealScreen() {
     if (G.round !== r || G.phase !== 'reveal') return; // 読みこみの間に、ほかの画面へ行っていた
     G.reveal = startReveal(canvas, G.layout, parts, {
       simple: SIMPLE_MERGE,
+      marks: USE_MARKS ? seamMarks(G.layout, targets) : null, // つなぎめの〇に、絵のはしを合わせる
       instant: true, // 描くところ（消しゴム・やり直し）は見せない。できあがった絵だけを合体する
       limit: USE_BOX, // 描いたときと同じにする（四角を使わないなら、合体でも使わない）
       targets,

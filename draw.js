@@ -319,6 +319,9 @@ export class Pad {
     this.rebuild();
   }
 
+  // つなぎめの〇（となりの絵とつながる場所）を決める。marks[k] = つなぎめ k の [始まり, 終わり]
+  setMarks(marks) { this.marks = marks || null; this.compose(); }
+
   rebuild() {
     this.layer.clear();
     this.ops.forEach((op) => this.layer.apply(op));
@@ -390,6 +393,23 @@ export class Pad {
       c.restore();
     });
     c.setLineDash([]);
+    // つなぎめの〇：絵の「はし」を、この2つの〇に合わせて描くと、となりの絵とつながる
+    if (this.marks) {
+      [this.part - 1, this.part].forEach((k) => {
+        const m = k >= 0 && k < L.cuts.length ? this.marks[k] : null;
+        if (!m) return;
+        m.forEach((u) => {
+          const [x, y] = toWorld(f, u, L.cuts[k]);
+          c.beginPath();
+          c.arc(x, y, 17, 0, Math.PI * 2);
+          c.fillStyle = '#fff';
+          c.fill();
+          c.lineWidth = 7;
+          c.strokeStyle = '#ff5d8f';
+          c.stroke();
+        });
+      });
+    }
     c.setTransform(1, 0, 0, 1, 0, 0);
   }
 
@@ -740,6 +760,57 @@ function profile(layout, data, i, cut, side) {
   if (runs.some((r) => r[1] - r[0] >= BODY_RUN && solid(r))) runs = runs.filter((r) => r[1] - r[0] >= THIN_RUN && solid(r));
   const a = runs[0][0], z = runs[runs.length - 1][1];
   return { n: runs.length, len: Math.max(2, z - a), a, b: z, c: (a + z) / 2 };
+}
+
+// ---------- つなぎめの〇（となりの絵とつながる場所） ----------
+// つなぎめごとに、〇を2つ置く場所 [始まり, 終わり] を決める。見本の「体」がつなぎめを通る範囲を使う。
+// 見本から決められないときは、つなぎめの 30%〜70% の所に置く。全員の画面で、同じ場所になる
+export function seamMarks(layout, targets) {
+  const E = layout.edgeLen;
+  return layout.cuts.map((cut, k) => {
+    let m = targets && targets.mains ? targets.mains[k] : null;
+    if (!m && targets) {
+      for (const [i, side] of [[k, -1], [k + 1, 1]]) {
+        const cv = targets[i] && targets[i].cv;
+        if (!cv) continue;
+        const data = [];
+        data[i] = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, cv.width, cv.height);
+        const P = profile(layout, data, i, cut, side);
+        if (P.n && P.len >= 40) { m = [P.a, P.b]; break; }
+      }
+    }
+    if (!m) m = [0.3 * E, 0.7 * E];
+    let a = clamp(m[0], 30, E - 30), b = clamp(m[1], 30, E - 30);
+    if (b - a < 60) { const c = clamp((a + b) / 2, 60, E - 60); a = c - 30; b = c + 30; } // 〇どうしが重ならないようにする
+    return [Math.round(a), Math.round(b)];
+  });
+}
+
+// 各自の絵を、つなぎめの〇に合わせる方法を決める。絵が つなぎめに届いている範囲（上のはし〜下のはし）を、2つの〇の間に重ねる。
+// 大きさは、たても横も同じ倍率（0.6倍〜1.8倍まで）。つなぎめから離れている絵は、つなぎめまで寄せる。
+// 返す値は registration と同じ形。動かさないパートは null。skip：動かさないパート（シングルの CPU）
+// はしのパートだけを動かす（3人以上の、まんなかのパートは動かさない）
+function markFit(layout, layers, marks, skip = -1) {
+  const n = layers.length;
+  return layers.map((l, i) => {
+    if (i === skip || n < 2) return null;
+    const seam = i === 0 ? 0 : i === n - 1 ? n - 2 : -1;
+    const to = seam >= 0 ? marks[seam] : null;
+    if (!to) return null;
+    const side = i === 0 ? -1 : 1, cut = layout.cuts[seam], img = l.ctx.getImageData(0, 0, l.cv.width, l.cv.height);
+    const A = frameBox(layout, img, i);
+    if (!A) return null; // 何も描いていない
+    const gap = gapOf(layout, img, i, cut, side), cutEff = cut + side * gap, data = [];
+    data[i] = img;
+    const P = profile(layout, data, i, cutEff, side);
+    if (!P.n || P.len < 40) return null; // つなぎめに届いていない（または、細い線だけ）
+    if (!gap && Math.abs(P.a - to[0]) < 14 && Math.abs(P.b - to[1]) < 14) return null; // もう合っている
+    const deep = Math.max(1, side < 0 ? cutEff - A.v0 : A.v1 - cutEff); // 絵の奥行き
+    let sc = clamp((to[1] - to[0]) / (P.b - P.a), 0.6, 1.8);
+    sc = Math.max(0.6, Math.min(sc, layout.depth / deep)); // 大きくしても、パートの奥行きをこえない
+    const dbg = { how: '〇', A: [A.u0, A.u1, A.v0, A.v1].map(Math.round), T: [], from: [P.a, P.b], to, gap };
+    return { su: sc, sv: sc, uA: (P.a + P.b) / 2, uT: (to[0] + to[1]) / 2, vA: cutEff, vT: cut, dbg };
+  });
 }
 
 // 目印どうしを組にする（数がちがってもよい）：近い目印どうしを、順番を入れかえずに組にする
@@ -1134,15 +1205,38 @@ export function startReveal(canvas, layout, partsOps, hooks = {}) {
     // シンプルな合体（hooks.simple）：大きさも位置も変えない。描いたままの絵を、そのまま並べて終わり。
     // つながり度の点数だけは、今までどおり計算する
     if (hooks.simple) {
-      result = analyze(layout, layers, false);
-      result.fit = result.fit.map(() => ({ lo: null, hi: null, sv: 1 }));
-      result.joints.forEach((j) => { delete j.warp; });
-      amount = 1;
-      timer = setTimeout(() => {
-        if (stopped) return;
-        compose(1, false);
-        if (hooks.onDone) hooks.onDone({ score: result.score, scores: result.scores, joints: result.joints, fit: result.fit, regInfo: null, hasTargets: !!targets, simple: true });
-      }, hooks.instant ? 900 : 500);
+      const end = (wait) => {
+        result = analyze(layout, layers, false);
+        result.fit = result.fit.map(() => ({ lo: null, hi: null, sv: 1 }));
+        result.joints.forEach((j) => { delete j.warp; });
+        amount = 1;
+        timer = setTimeout(() => {
+          if (stopped) return;
+          compose(1, false);
+          if (hooks.onDone) hooks.onDone({ score: result.score, scores: result.scores, joints: result.joints, fit: result.fit, regInfo, hasTargets: !!targets, simple: true });
+        }, wait);
+      };
+      // hooks.marks：つなぎめの〇。各自の絵の「はし」を〇に合わせてから、並べる
+      regs = hooks.marks ? markFit(layout, layers, hooks.marks, Number.isInteger(hooks.cpuPart) ? hooks.cpuPart : -1) : null;
+      regInfo = regs ? regs.map((g) => (g ? { ...g.dbg, su: +g.su.toFixed(2), sv: +g.sv.toFixed(2), idle: false } : null)) : null; // 確認用
+      if (regs && regs.some(Boolean)) {
+        if (hooks.onFit) hooks.onFit();
+        let began1 = 0;
+        const regFrame = () => {
+          if (stopped) return;
+          if (!began1) began1 = Date.now();
+          const raw = Math.min(1, (Date.now() - began1) / 1000);
+          composeReg(raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2);
+          if (raw < 1) { timer = setTimeout(regFrame, 16); return; }
+          bake();
+          regs = null;
+          end(400);
+        };
+        timer = setTimeout(regFrame, 700);
+        return;
+      }
+      regs = null;
+      end(hooks.instant ? 900 : 500);
       return;
     }
     if (hooks.onFit) hooks.onFit();
