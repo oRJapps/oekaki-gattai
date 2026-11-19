@@ -12,6 +12,40 @@ const GREEN = '#4caf50', DGREEN = '#256b2a', LGREEN = '#a5d66f', BLUE = '#1e88e5
 const PINK = '#f8a5c2', DPINK = '#d6497f', BROWN = '#8d5a2b', DBROWN = '#4e2f14', TAN = '#e2b276', CREAM = '#fff3d6', WHITE = '#ffffff';
 const GRAY = '#9aa5ab', LGRAY = '#dfe4e7', DGRAY = '#4f5b62', BLACK = '#1e1e1e', PURPLE = '#8e24aa', INK = '#3b2a1e';
 
+// ---------- 色：描く画面でえらべる12色（12色の色鉛筆と同じ並び） ----------
+// 見本の絵も、この12色だけで描く（見本と同じ色で、だれでも描けるように）
+export const COLOR_LIST = [['#e60012', 'あか'], ['#f39800', 'だいだいいろ'], ['#ffe100', 'きいろ'], ['#8fc31f', 'きみどり'], ['#009944', 'みどり'], ['#54c3f1', 'みずいろ'],
+  ['#0068b7', 'あお'], ['#8b2f97', 'むらさき'], ['#f29fbf', 'ももいろ'], ['#8a4b2a', 'ちゃいろ'], ['#1e1e1e', 'くろ'], ['#ffffff', 'しろ']];
+// 色を「明るさ・赤み・黄み」の数字に直す（人の目で見た近さで、色をくらべるため）
+function labOf(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255].map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+  const t = (v) => (v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116);
+  const x = t((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.9505), y = t(0.2126 * r + 0.7152 * g + 0.0722 * b), z = t((0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.089);
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+}
+const PAL = COLOR_LIST.map(([c]) => [c, labOf(c)]);
+const penCache = {};
+// 見本の色を、12色のうち、いちばん近い色に直す。
+// 色みのない色（灰色など）：暗ければ「くろ」、そうでなければ「しろ」（灰色のえんぴつは無いので、ぬらずに残す）
+export function penColor(hex) {
+  if (penCache[hex]) return penCache[hex];
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
+  const [l, a, b] = labOf(hex);
+  let best = hex;
+  if (Math.hypot(a, b) < 12) best = l < 45 ? '#1e1e1e' : '#ffffff';
+  else {
+    let bd = Infinity;
+    for (const [c, q] of PAL) {
+      const d = Math.hypot(l - q[0], a - q[1], b - q[2]);
+      if (d < bd) { bd = d; best = c; }
+    }
+  }
+  penCache[hex] = best;
+  return best;
+}
+const toPens = (ops) => ops.map((op) => (op.c ? { ...op, c: penColor(op.c) } : op));
+
 const flat = (pts) => pts.flat().map(Math.round);
 const fillOp = (c, pts) => ({ g: 1, c, p: flat(pts) });
 const lineOp = (c, w, pts) => ({ c, w, e: 0, p: flat(pts) });
@@ -126,11 +160,11 @@ export async function loadSample(topic, file, flip = false, mod = '', left = fal
     if (!loaded[file]) loaded[file] = (await import(`./samples/${file}.js${VER}`)).default(KIT);
     const make = loaded[file][topic];
     if (!make) return null;
-    const ops = make().flat(Infinity).filter(Boolean);
+    const ops = toPens(make().flat(Infinity).filter(Boolean)); // 12色に直す
     const turned = flip ? ops.map((op) => ({ ...op, p: op.p.map((v, i) => (i % 2 ? v : 1000 - v)) })) : ops;
     if (!mod) return turned;
     if (!loaded.mods) loaded.mods = (await import(`./samples/mods.js${VER}`)).default(KIT);
-    return loaded.mods.decorate(turned, mod, topic, left);
+    return toPens(loaded.mods.decorate(turned, mod, topic, left));
   } catch (err) {
     console.warn('sample', file, err);
     return null;
@@ -146,7 +180,7 @@ export async function loadAlternates(topic, file, flip = false, mod = '', left =
   try {
     const plain = await loadSample(topic, file, flip);
     if (plain) out.push({ ops: plain, weight: 0.9 });
-    if (mod === 'リボンを付けた' && plain && loaded.mods && loaded.mods.hasNeck(topic)) out.push({ ops: loaded.mods.decorate(plain, mod, topic, left, 'neck'), weight: 1 });
+    if (mod === 'リボンを付けた' && plain && loaded.mods && loaded.mods.hasNeck(topic)) out.push({ ops: toPens(loaded.mods.decorate(plain, mod, topic, left, 'neck')), weight: 1 });
   } catch (err) { console.warn('alternates', err); }
   return out;
 }
