@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119170138';
-import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261119170138';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks } from './draw.js?v=20261119170138';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119170138';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119170138';
-import { makeCard } from './card.js?v=20261119170138';
-import * as net from './net.js?v=20261119170138';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119172247';
+import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261119172247';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261119172247';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119172247';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119172247';
+import { makeCard } from './card.js?v=20261119172247';
+import * as net from './net.js?v=20261119172247';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -254,7 +254,7 @@ function levelScreen(next) {
       return card(color, art, lv.label, lv.hint, () => chooseLevel(next, key),
         h('span', { class: 'stars', 'aria-label': `むずかしさ ${stars}` }, '★'.repeat(stars), h('i', {}, '★'.repeat(Math.max(0, 3 - stars)))));
     })),
-    backButton(next === 'friend' ? friendScreen : titleScreen),
+    backButton(next === 'friend' ? gameScreen : titleScreen),
   );
 }
 
@@ -268,11 +268,12 @@ function chooseLevel(next, level) {
 // 対戦：人数だけ決める（同じ難易度・同じ人数の部屋に入る）。フレンド：人数と、4けたのカギを自分で決める
 function setupScreen(next, level, keep = {}) {
   // 人数は半角数字で入力する（全角で入れても、半角に直して読む）。入れた人数で、絵を分ける数が決まる
+  const game = next === 'friend' ? (G.newGame || 'gattai') : 'gattai', min = GAMES[game].min;
   const toHalf = (t) => t.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
-  const sizeInput = h('input', { class: 'size-input', id: 'room-size', inputmode: 'numeric', maxlength: 1, autocomplete: 'off', 'aria-label': '人数', value: String(keep.size || 2) });
+  const sizeInput = h('input', { class: 'size-input', id: 'room-size', inputmode: 'numeric', maxlength: 1, autocomplete: 'off', 'aria-label': '人数', value: String(keep.size || min) });
   const split = h('p', { class: 'note', id: 'split-note', role: 'status' }, '');
-  const readSize = () => { const n = parseInt(toHalf(sizeInput.value).replace(/\D/g, ''), 10); return n >= 2 && n <= MAX_PLAYERS ? n : 0; };
-  const paint = () => { const n = readSize(); split.textContent = n ? `絵を${n}つに分けます` : `2〜${MAX_PLAYERS}の数字を入れてね`; };
+  const readSize = () => { const n = parseInt(toHalf(sizeInput.value).replace(/\D/g, ''), 10); return n >= min && n <= MAX_PLAYERS ? n : 0; };
+  const paint = () => { const n = readSize(); split.textContent = !n ? `${min}〜${MAX_PLAYERS}の数字を入れてね` : game === 'pick' ? `1人がお題を決めて、${n - 1}人で描きます` : game === 'shiri' ? `${n}人で、順番に描きます` : `絵を${n}つに分けます`; };
   sizeInput.addEventListener('input', paint);
   sizeInput.addEventListener('focus', () => sizeInput.select());
   paint();
@@ -283,7 +284,7 @@ function setupScreen(next, level, keep = {}) {
     || (input ? '好きな4けたの数字をカギにしてね。友だちには、この数字を教える' : next === 'local' ? '1台を、順番に回して描きます。ほかの人が描いている間は、画面を見ないでね' : '同じ人数をえらんだ人と、同じ部屋になります'));
   const go = () => {
     const size = readSize();
-    if (!size) { sfx('error'); msg.textContent = `人数は2〜${MAX_PLAYERS}の半角数字で入れてね`; sizeInput.focus(); return; }
+    if (!size) { sfx('error'); msg.textContent = `人数は${min}〜${MAX_PLAYERS}の半角数字で入れてね`; sizeInput.focus(); return; }
     let code = null;
     if (input) {
       code = input.value.replace(/\D/g, '');
@@ -295,18 +296,19 @@ function setupScreen(next, level, keep = {}) {
   [sizeInput, input].forEach((el) => { if (el) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); }); });
   show('setup-' + next,
     head(next === 'friend' ? '部屋を作る' : next === 'local' ? 'みんなで' : '対戦', input ? '人数とカギを決めよう' : '人数を決めよう'),
-    h('div', { class: 'tools' }, h('p', { class: 'lead' }, `何人で遊ぶ？（2〜${MAX_PLAYERS}の半角数字）`), row, split),
+    h('div', { class: 'tools' }, h('p', { class: 'lead' }, `何人で遊ぶ？（${min}〜${MAX_PLAYERS}の半角数字）`), row, split),
     input ? h('div', { class: 'ticket' }, h('small', {}, icon('key'), 'カギ（4けた）'), input,
       h('button', { class: 'tool', onclick: () => { input.value = String(Math.floor(Math.random() * 10000)).padStart(4, '0'); } }, 'おまかせ')) : null,
     msg,
     h('button', { class: 'btn primary', id: 'open-room', onclick: go }, input ? '部屋を作る' : next === 'local' ? '始める' : '部屋に入る'),
-    backButton(() => levelScreen(next)),
+    backButton(() => (next === 'friend' && game === 'shiri' ? gameScreen() : levelScreen(next))),
   );
 }
 
 async function openRoom(next, level, size, code) {
   G.level = level;
   G.mode = next;
+  G.game = next === 'friend' ? (G.newGame || 'gattai') : 'gattai';
   show('loading', h('div', { class: 'loading' }, h('i', {}), h('i', {}), h('i', {})), h('p', { class: 'lead' }, next === 'online' ? '部屋をさがしています…' : '部屋を作っています…'));
   try {
     let room = next === 'online' ? await net.api.findRoom(level, size) : null;
@@ -334,8 +336,26 @@ function friendScreen() {
     head('フレンド', '友だちと同じ部屋で遊ぼう'),
     h('nav', { class: 'menu' },
       card('#ffc928', icon('key'), 'カギを入力', '友だちの部屋に入る', keyScreen),
-      card('#3ddc84', icon('door'), '部屋を作る', '人数とカギを自分で決める', () => levelScreen('friend'))),
+      card('#3ddc84', icon('door'), '部屋を作る', 'モード・人数・カギを自分で決める', gameScreen)),
     backButton(titleScreen),
+  );
+}
+
+// フレンドの部屋で遊ぶモード。min = 必要な人数
+const GAMES = {
+  gattai: { label: 'お絵かき合体モード', hint: 'お題を分けて描いて、合体する（通常）', color: '#ff5d8f', icon: 'pen', min: 2 },
+  pick: { label: 'お絵かきモード', hint: '1人がお題を決めて、ほかの人が描く', color: '#3ec5ff', icon: 'people', min: 3 },
+  shiri: { label: '絵しりとりモード', hint: '絵でしりとり。✕が出るまで続く', color: '#ffc928', icon: 'again', min: 2 },
+};
+const gameOf = () => (GAMES[G.game] ? G.game : 'gattai');
+function gameScreen() {
+  show('game',
+    head('部屋を作る', 'モードをえらぼう'),
+    h('nav', { class: 'menu' }, Object.entries(GAMES).map(([key, g]) => card(g.color, icon(g.icon), g.label, g.hint, () => {
+      G.newGame = key;
+      if (key === 'shiri') setupScreen('friend', 'A'); else levelScreen('friend'); // 絵しりとりは、難易度をえらばない
+    }))),
+    backButton(friendScreen),
   );
 }
 
@@ -352,6 +372,7 @@ function keyScreen() {
       if (room && room.error === 'locked') { sfx('error'); msg.textContent = 'まちがいが続いたので、1分ほど待ってからもう一度ためしてね'; return; }
       if (!room) { sfx('error'); msg.textContent = 'そのカギの部屋は見つかりませんでした'; return; }
       G.mode = 'friend';
+      G.game = null; // モードは、部屋にいる人から教えてもらう
       G.level = room.difficulty;
       await enterRoom(room);
     } catch (err) {
@@ -369,7 +390,7 @@ function keyScreen() {
 // ---------- 部屋（ロビー） ----------
 // 自分の状態（部屋のみんなに知らせる）。phase は「部屋で待っている（lobby）」か「遊んでいる（play）」かだけを知らせる。
 // 細かく分けて知らせると送る回数がふえ、Supabase に接続を切られる（net.js の join の説明）
-const myState = () => ({ id: me.id, pub: me.pub, name: me.name, joinedAt: G.joinedAt, ready: G.ready, phase: G.phase === 'lobby' ? 'lobby' : 'play' });
+const myState = () => ({ id: me.id, pub: me.pub, name: me.name, joinedAt: G.joinedAt, ready: G.ready, phase: G.phase === 'lobby' ? 'lobby' : 'play', game: G.game || '' });
 // この部屋の人数（部屋を作った人が決めた数。分からないときは5人）
 const cap = () => Math.min(MAX_PLAYERS, Math.max(2, (G.room && G.room.size) || MAX_PLAYERS));
 // ラウンドを始める係：部屋にいる人の中で、id がいちばん小さい人。
@@ -387,6 +408,8 @@ async function enterRoom(room) {
   G.pending = new Set(); G.lastList = []; G.orderIds = []; G.goneAt = {}; G.joinTimes = {}; G.admitted = false;
   // 入ってから3秒たったら、席の順番を確定させる（満員かどうかもここで決まる）
   setTimeout(() => { if (G.room === room) onPresence(G.lastList); }, 3200);
+  // モードを教えてくれる人がいないとき（古い版の人だけの部屋）は、通常のモードにする
+  setTimeout(() => { if (G.room === room && !G.game) { G.game = 'gattai'; track(); G.lobbySig = ''; renderLobby(); } }, 6000);
   G.seenRounds = new Set(); G.queue = Promise.resolve(); G.roomTopics = new Set();
   G.joinedAt = Date.now();
   G.phase = 'lobby';
@@ -417,6 +440,7 @@ const cleanPlayer = (p) => ({
   id: p.id, name: String(p.name == null ? '' : p.name).slice(0, 12) || '？',
   joinedAt: Number.isFinite(p.joinedAt) ? p.joinedAt : 0, ready: p.ready === true,
   phase: PHASES.includes(p.phase) ? p.phase : 'lobby',
+  game: typeof p.game === 'string' && GAMES[p.game] ? p.game : '',
 });
 
 // 公開する鍵から計算した id が、名のっている id と同じなら本物。確かめ終わったら、もう一度一覧を作り直す
@@ -473,6 +497,8 @@ function onPresence(list) {
 
   const before = G.players.length;
   G.players = G.orderIds.slice(0, cap()).filter((id) => valid.has(id)).map((id) => valid.get(id));
+  // あとから入った人：前からいる人のモードに合わせる
+  if (!G.game) { const g = (G.players.find((q) => q.game) || {}).game; if (g) { G.game = g; track(); } }
   if (G.round && G.round.order) {
     for (const o of G.round.order) {
       if (G.players.some((p) => p.id === o.id)) delete G.seen[o.id];
@@ -491,7 +517,7 @@ function onPresence(list) {
 
 // ---------- ラウンドを始める ----------
 // 決めた人数がそろって、全員が「準備OK」なら始められる
-const allReady = () => G.players.length === cap() && G.players.every((p) => p.ready && p.phase === 'lobby');
+const allReady = () => G.players.length === cap() && !!G.game && G.players.every((p) => p.ready && p.phase === 'lobby' && (p.game || 'gattai') === gameOf());
 
 // 2人以上いて全員が「準備OK」なら、先頭の人がラウンドを始める。
 // 先頭の人が始めないとき（席の順番が画面によってずれたとき）は、4〜6秒後にほかの人が始める。
@@ -543,6 +569,20 @@ function shuffleParts(players) {
 
 function startRound() {
   G.starting = true;
+  if (G.game === 'pick') { // お題を決める人を、くじ引きでえらぶ（前と同じ人は、なるべくさける）
+    const pool = G.players.filter((q) => q.id !== LAST.chooser);
+    const who = (pool.length ? pool : G.players)[Math.floor(Math.random() * (pool.length || G.players.length))];
+    sendSigned('ask', { id: crypto.randomUUID(), chooser: who.id });
+    net.api.updateRoom(G.room, { status: 'playing', player_count: G.players.length });
+    return;
+  }
+  if (G.game === 'shiri') { // 描く順番を、くじ引きで決める
+    const order = G.players.slice();
+    for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+    sendSigned('sstart', { id: crypto.randomUUID(), seconds: SHIRI_SECONDS, order: order.map((q) => ({ id: q.id, name: q.name })) });
+    net.api.updateRoom(G.room, { status: 'playing', player_count: G.players.length });
+    return;
+  }
   const ps = shuffleParts(G.players);
   const topic = nextTopic(G.room.difficulty, G.roomTopics); // まだ出ていないお題からえらぶ
   sendSigned('start', {
@@ -577,18 +617,32 @@ async function handleEvent(type, msg) {
   if (!G.room || !d || d.room !== G.room.id) return; // ほかの部屋のメッセージの使い回しは受けつけない
   if (type === 'start') handleStart(d, msg.from);
   if (type === 'part') handlePart(d, msg.from);
+  if (type === 'ask') handleAsk(d, msg.from);
+  if (type === 'sstart') handleShiriStart(d, msg.from);
+  if (type === 'sturn') handleShiriTurn(d, msg.from);
 }
 
 // 「始める」の中身を確かめる：お題と分け方は決まった一覧の中だけ、参加者は本物と確かめた人だけ
 function validStart(d, from) {
+  if (G.game === 'shiri') return false;
   if (typeof d.id !== 'string' || d.id.length > 64 || G.seenRounds.has(d.id)) return false;
   if (!Array.isArray(d.order) || d.order.length < 2 || d.order.length > MAX_PLAYERS || d.count !== d.order.length) return false;
   const ids = d.order.map((o) => (o && typeof o.id === 'string' ? o.id : ''));
-  if (new Set(ids).size !== ids.length || !ids.every((id) => G.keys.has(id)) || !ids.includes(from)) return false;
-  const parsed = parseTopic(d.topic); // お題は、決まった一覧（と、決まったことばの組み合わせ）の中だけ
-  if (!parsed || parsed.level !== (G.room.difficulty === 'D' ? 'C' : G.room.difficulty)) return false; // 激辛のお題は、上級と同じ
+  if (new Set(ids).size !== ids.length || !ids.every((id) => G.keys.has(id))) return false;
+  const custom = d.custom === true;
+  if (custom !== (G.game === 'pick')) return false;
+  if (custom) {
+    // お絵かきモード：お題は、えらばれた人が決めた文字（12文字まで）。決めた人は描かない
+    if (!G.ask || d.ask !== G.ask.id || from !== G.ask.chooser || ids.includes(from)) return false;
+    if (typeof d.topic !== 'string' || !d.topic || cleanTopic(d.topic) !== d.topic) return false;
+    if (d.count !== cap() - 1) return false;
+  } else {
+    if (!ids.includes(from)) return false;
+    const parsed = parseTopic(d.topic); // お題は、決まった一覧（と、決まったことばの組み合わせ）の中だけ
+    if (!parsed || parsed.level !== (G.room.difficulty === 'D' ? 'C' : G.room.difficulty)) return false; // 激辛のお題は、上級と同じ
+    if (G.room.size && d.count !== cap()) return false; // 決めた人数で分ける
+  }
   if (!layoutsFor(d.count).includes(d.layout)) return false;
-  if (G.room.size && d.count !== cap()) return false; // 決めた人数で分ける
   return Number.isInteger(d.seconds) && d.seconds >= 5 && d.seconds <= 600;
 }
 
@@ -597,27 +651,31 @@ function handleStart(d, from) {
   // これがないと、人によって別々のラウンドになり、相手の絵が届かないまま「1/2人」で合体してしまう
   const cur = G.round;
   const swap = G.phase === 'intro' && !!cur && !cur.solo && typeof d.id === 'string' && d.id < cur.id;
-  if (G.phase !== 'lobby' && !swap) return;
+  const open = d.custom === true ? G.phase === 'pick' : G.phase === 'lobby'; // お絵かきモードは「お題を待つ画面」から始まる
+  if (!open && !swap) return;
   if (!validStart(d, from)) { log('rejected: invalid start'); return; }
   if (swap) log(`start collision: switch ${cur.id} -> ${d.id}`);
   G.seenRounds.add(d.id);
-  G.roomTopics.add(parseTopic(d.topic).base); // この部屋で出たお題。次からは出さない
+  const known = parseTopic(d.topic);
+  if (known) G.roomTopics.add(known.base); // この部屋で出たお題。次からは出さない
   // 今回の分け方と、だれがどのパートかをおぼえる（次のラウンドで、同じ場所ばかりにならないようにする）
   noteLayout(d.layout);
   LAST.runs = Object.fromEntries(d.order.map((o, i) => [o.id, LAST.parts[o.id] === i ? (LAST.runs[o.id] || 1) + 1 : 1]));
   LAST.parts = Object.fromEntries(d.order.map((o, i) => [o.id, i]));
   const index = d.order.findIndex((o) => o.id === me.id);
   // 自分が入っていない、または自分が「準備OK」を押していないラウンドには参加しない
-  if (index < 0 || (!G.ready && !swap)) {
+  const watcher = d.custom === true && from === me.id; // お題を決めた人：描かずに、合体を見る
+  if (!watcher && (index < 0 || (!G.ready && !swap))) {
     if (swap) lobbyScreen(); // 合わせる先のラウンドに自分が入っていない：部屋の画面へもどる
     G.busy = true; G.lobbySig = ''; renderLobby();
     return;
   }
-  markTopic(d.topic);
+  if (d.custom !== true) markTopic(d.topic);
   const nameOf = (o) => (G.players.find((p) => p.id === o.id) || {}).name || String(o.name == null ? '？' : o.name).slice(0, 12);
   beginRound({
     id: d.id, topic: d.topic, count: d.count, seconds: d.seconds, layout: d.layout,
-    order: d.order.map((o) => ({ id: o.id })), myPart: index, owners: d.order.map(nameOf),
+    order: d.order.map((o) => ({ id: o.id })), myPart: watcher ? -1 : index, owners: d.order.map(nameOf),
+    custom: d.custom === true, spectator: watcher,
   });
 }
 
@@ -642,6 +700,8 @@ function lobbyScreen() {
   G.round = null;
   G.phase = 'lobby';
   G.starting = false;
+  G.ask = null;
+  G.shiri = null;
   G.lobbySig = '';
   track();
   renderLobby();
@@ -650,7 +710,7 @@ function lobbyScreen() {
 function renderLobby() {
   if (G.phase !== 'lobby' || !G.room) return;
   // 中身が同じなら作り直さない（お試しモードは1秒ごとに在席の知らせが来る）
-  const sig = JSON.stringify([G.players.map((p) => [p.id, p.name, p.ready, p.phase]), G.ready, G.busy, G.room.id]);
+  const sig = JSON.stringify([G.players.map((p) => [p.id, p.name, p.ready, p.phase, p.game]), G.ready, G.busy, G.room.id, G.game]);
   if (sig === G.lobbySig && $app.dataset.screen === 'lobby') return;
   G.lobbySig = sig;
 
@@ -667,13 +727,15 @@ function renderLobby() {
   }
   const info = G.busy ? 'いまゲーム中です。次のラウンドから参加できます'
     : G.players.length < cap() ? `あと${cap() - G.players.length}人そろうと始められます（${cap()}人の部屋）`
-      : '全員が「準備OK」を押すと始まります';
+      : G.game === 'pick' ? '全員が「準備OK」を押すと、お題を決める人がくじ引きでえらばれます'
+        : G.game === 'shiri' ? '全員が「準備OK」を押すと、絵しりとりが始まります' : '全員が「準備OK」を押すと始まります';
   const copyKey = async () => {
     try { await navigator.clipboard.writeText(G.room.code); toast('カギをコピーしました'); } catch (e) { toast('カギ：' + G.room.code); }
   };
   show('lobby',
     head(modeLabel() + 'の部屋'),
-    h('p', { class: 'chips' }, h('span', { class: 'chip' }, '難易度：' + lv.label), h('span', { class: 'chip' }, `${G.players.length} / ${cap()} 人`)),
+    h('p', { class: 'chips' }, G.mode === 'friend' ? h('span', { class: 'chip gold', id: 'game-chip' }, G.game ? GAMES[gameOf()].label : 'モードを確認中…') : null,
+      G.game === 'shiri' ? null : h('span', { class: 'chip' }, '難易度：' + lv.label), h('span', { class: 'chip' }, `${G.players.length} / ${cap()} 人`)),
     G.room.code ? h('div', { class: 'ticket' }, h('small', {}, icon('key'), 'カギ（友だちに教えてね）'), h('b', { id: 'room-key' }, formatKey(G.room.code)),
       h('button', { class: 'tool', onclick: copyKey }, icon('copy'), 'コピー')) : null,
     h('ul', { class: 'podiums', style: `--n:${cap()};--m:${Math.min(3, cap())}` }, seats),
@@ -683,6 +745,244 @@ function renderLobby() {
       onclick: () => { G.ready = !G.ready; sfx(G.ready ? 'ready' : 'unready'); track(); renderLobby(); hostCheck(); },
     }, G.ready ? icon('check') : null, G.ready ? '準備OK！（押すと取り消し）' : '準備OK'),
     backButton(() => { leaveRoom(); titleScreen(); }),
+  );
+}
+
+// ---------- お絵かきモード（1人がお題を決めて、ほかの人が描く） ----------
+// お題の文字をきれいにする：見えない文字と < > を取りのぞき、12文字までにする
+const cleanTopic = (t) => [...String(t == null ? '' : t).replace(/[\u0000-\u001f\u007f<>]/g, '').trim()].slice(0, 12).join('');
+
+// 「お題を決める人」の知らせ。2つ重なったときは、番号（id）の小さいほうに全員が合わせる
+function handleAsk(d, from) {
+  if (G.game !== 'pick' || typeof d.id !== 'string' || d.id.length > 64 || G.seenRounds.has(d.id)) return;
+  if (typeof d.chooser !== 'string' || !G.keys.has(d.chooser) || !G.players.some((q) => q.id === d.chooser) || !G.players.some((q) => q.id === from)) return;
+  const swap = G.phase === 'pick' && G.ask && d.id < G.ask.id;
+  if (G.phase !== 'lobby' && !swap) return;
+  G.seenRounds.add(d.id);
+  if (!G.ready && !swap) { G.busy = true; G.lobbySig = ''; renderLobby(); return; } // 「準備OK」を押していない人は、参加しない
+  LAST.chooser = d.chooser;
+  G.ask = { id: d.id, chooser: d.chooser };
+  pickScreen();
+}
+
+function pickScreen() {
+  const ask = G.ask, who = G.players.find((q) => q.id === ask.chooser) || { name: '？' };
+  clearTimers();
+  G.phase = 'pick';
+  track();
+  sfx('topic');
+  // 90秒たってもお題が決まらなければ、部屋にもどる
+  later(() => { if (G.phase === 'pick' && G.ask === ask) { toast('お題が決まらなかったので、部屋にもどります'); lobbyScreen(); } }, 90000);
+  if (ask.chooser !== me.id) {
+    show('pick-wait', head('お絵かきモード', 'お題を待っています'),
+      h('div', { class: 'loading' }, h('i', {}), h('i', {}), h('i', {})),
+      h('p', { class: 'lead' }, `「${who.name}」さんが、お題を考えています…`),
+      h('p', { class: 'note' }, 'お題が決まると、あなたが描くパートが出ます'));
+    return;
+  }
+  const drawers = G.players.filter((q) => q.id !== me.id);
+  const input = h('input', { class: 'input', id: 'pick-topic', maxlength: 12, placeholder: 'お題（12文字まで）', autocomplete: 'off', 'aria-label': 'お題' });
+  const msg = h('p', { class: 'note', role: 'status' }, `あなたは描きません。ほかの${drawers.length}人が、このお題を分けて描きます`);
+  const btn = h('button', { class: 'btn primary go', id: 'pick-go' }, icon('check'), 'このお題で始める');
+  const go = () => {
+    const topic = cleanTopic(input.value);
+    if (!topic) { sfx('error'); msg.textContent = 'お題を入れてね（12文字まで）'; input.focus(); return; }
+    if (drawers.length < 2) { sfx('error'); msg.textContent = '描く人が2人以上いないと、始められません'; return; }
+    btn.disabled = true;
+    const ps = shuffleParts(drawers);
+    sendSigned('start', {
+      id: crypto.randomUUID(), ask: ask.id, custom: true, topic, count: ps.length, seconds: DRAW_SECONDS,
+      layout: freshLayout(G.room.difficulty, ps.length, false), order: ps.map((q) => ({ id: q.id, name: q.name })),
+    });
+    msg.textContent = 'お題を送りました…';
+  };
+  btn.addEventListener('click', go);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  show('pick', head('お絵かきモード', 'あなたがお題を決める番'),
+    h('div', { class: 'ticket' }, h('small', {}, icon('pen'), 'お題'), input), msg, btn);
+  input.focus();
+}
+
+// お題を決めた人の画面：描かずに待って、みんなの絵がそろったら合体を見る
+function watchScreen() {
+  const r = G.round;
+  clearTimers();
+  G.phase = 'wait';
+  G.submitted = true;
+  track();
+  show('watch', board(r.topic, true),
+    h('div', { class: 'loading' }, h('i', {}), h('i', {}), h('i', {})),
+    h('p', { class: 'lead' }, 'みんなが描いています…'),
+    h('p', { class: 'note', id: 'wait-text', role: 'status' }, `ほかの人を待っています（0 / ${r.order.length} 人が完成）`),
+    h('p', { class: 'note' }, '全員が描き終わると、合体が始まります'));
+  every(checkAllParts, 1000);
+  later(revealScreen, INTRO_MS + r.seconds * 1000 + 8000); // 時間切れのあとも届かないときは、あるぶんだけで合体する
+}
+
+// ---------- 絵しりとり ----------
+// 1人ずつ順番に、絵を描いて、答え（ひらがな）を入れる。次の人には絵だけが届く。
+// 答えどうしがしりとりになっていれば〇で次の人へ。なっていなければ✕で終わり。✕が出るまで、何周でも続く（30枚でクリア）
+const SHIRI_SECONDS = Math.min(DRAW_SECONDS, 90), SHIRI_MAX = 30;
+const SHIRI_LAYOUT = oneLayout();
+const KANA_BIG = { ぁ: 'あ', ぃ: 'い', ぅ: 'う', ぇ: 'え', ぉ: 'お', ゃ: 'や', ゅ: 'ゆ', ょ: 'よ', っ: 'つ', ゎ: 'わ' };
+// カタカナをひらがなに直して、空白を取る
+const toHira = (t) => String(t == null ? '' : t).normalize('NFKC').replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s/g, '');
+const normWord = (t) => [...toHira(t).replace(/[^ぁ-ゖー]/g, '')].slice(0, 12).join('');
+const pureKana = (t) => /^[ぁ-ゖー]+$/.test(toHira(t));
+const wordHead = (w) => KANA_BIG[w[0]] || w[0] || '';
+// 最後の文字：のばす音「ー」は、その前の文字を使う。小さい文字は、大きい文字に直す
+const wordTail = (w) => { const s = w.replace(/ー+$/, ''), c = s[s.length - 1] || ''; return KANA_BIG[c] || c; };
+// ✕の理由を返す（〇なら空の文字）
+function shiriJudge(s, k, word) {
+  if (!word) return 'こたえが入っていない（時間切れ）';
+  if (k > 0) { const need = wordTail(s.chain[k - 1].word); if (wordHead(word) !== need) return `「${need}」から始まっていない`; }
+  if (s.chain.some((c) => c.word === word)) return '同じことばが、もう出ている';
+  if (wordTail(word) === 'ん') return '「ん」で終わった';
+  return '';
+}
+
+function handleShiriStart(d, from) {
+  const cur = G.shiri;
+  const swap = G.phase === 'shiri' && !!cur && !cur.chain.length && typeof d.id === 'string' && d.id < cur.id;
+  if (G.game !== 'shiri' || (G.phase !== 'lobby' && !swap)) return;
+  if (typeof d.id !== 'string' || d.id.length > 64 || G.seenRounds.has(d.id)) return;
+  if (!Array.isArray(d.order) || d.order.length !== cap()) return;
+  const ids = d.order.map((o) => (o && typeof o.id === 'string' ? o.id : ''));
+  if (new Set(ids).size !== ids.length || !ids.every((id) => G.keys.has(id)) || !ids.includes(from)) return;
+  if (!Number.isInteger(d.seconds) || d.seconds < 5 || d.seconds > 600) return;
+  G.seenRounds.add(d.id);
+  if (!ids.includes(me.id) || (!G.ready && !swap)) {
+    if (swap) lobbyScreen();
+    G.busy = true; G.lobbySig = ''; renderLobby();
+    return;
+  }
+  const nameOf = (o) => (G.players.find((q) => q.id === o.id) || {}).name || String(o.name == null ? '？' : o.name).slice(0, 12);
+  G.shiri = { id: d.id, seconds: d.seconds, order: d.order.map((o) => ({ id: o.id, name: nameOf(o) })), chain: [], ended: false };
+  G.ready = false;
+  shiriTurn();
+}
+
+// 次の番へ：自分の番なら描く画面、ちがえば待つ画面
+function shiriTurn() {
+  const s = G.shiri, k = s.chain.length, who = s.order[k % s.order.length];
+  clearTimers();
+  G.phase = 'shiri';
+  G.pad = null;
+  track();
+  if (who.id === me.id) { shiriDraw(); return; }
+  show('shiri-wait-' + k, head('絵しりとり', `${k + 1}枚目`),
+    h('div', { class: 'loading' }, h('i', {}), h('i', {}), h('i', {})),
+    h('p', { class: 'lead', id: 'shiri-who' }, `今は「${who.name}」さんの番`),
+    h('p', { class: 'note' }, k ? `ここまで${k}枚つながっています` : '最初の1枚を描いています'),
+    h('p', { class: 'note' }, 'ほかの人の絵は、終わるまで見えません'));
+  // 時間をすぎても絵が届かなければ、そこで終わりにする
+  later(() => shiriEnd(`時間切れ：「${who.name}」さんの絵が届きませんでした`), (s.seconds + 25) * 1000);
+}
+
+function shiriDraw() {
+  const s = G.shiri, k = s.chain.length, prev = k ? s.chain[k - 1] : null;
+  sfx('go');
+  const canvas = h('canvas', { class: 'pad', id: 'pad' });
+  const pad = new Pad(canvas, SHIRI_LAYOUT, 0, {});
+  G.pad = pad;
+  const timer = h('b', { id: 'timer' }, '');
+  const bar = h('i', {});
+  const clock = h('div', { class: 'clock' }, icon('clock'), timer, h('span', { class: 'timebar' }, bar));
+  const word = h('input', { class: 'input', id: 'shiri-word', maxlength: 14, placeholder: 'こたえ（ひらがな）', autocomplete: 'off', 'aria-label': 'こたえ' });
+  const msg = h('p', { class: 'note', id: 'shiri-msg', role: 'status' },
+    prev ? '前の絵に、しりとりでつながる絵を描こう。こたえは、ほかの人には見えません' : '好きな絵を描こう。こたえは、ほかの人には見えません');
+  let sent = false;
+  const submit = (force) => {
+    if (sent || G.shiri !== s) return;
+    const raw = word.value.trim();
+    if (!force && (!raw || !pureKana(raw))) { sfx('error'); msg.textContent = 'こたえを、ひらがなで入れてね'; word.focus(); return; }
+    sent = true;
+    pad.enabled = false;
+    clearTimers();
+    sfx('done');
+    const data = { game: s.id, k, ops: cleanOps(pad.getOps()), word: normWord(raw) };
+    // 1回だけの送信は、届かないことがある。次の人の絵が届くまで、3秒ごとに送り直す（8回まで）
+    let tries = 0;
+    const send = () => {
+      if (!G.chan || G.shiri !== s || tries >= 8 || s.chain.length > k + 1) { clearInterval(G.resend); return; }
+      tries++;
+      sendSigned('sturn', data);
+    };
+    clearInterval(G.resend);
+    send();
+    G.resend = setInterval(send, 3000);
+    shiriApply(k, data.ops, data.word);
+  };
+  const endAt = Date.now() + s.seconds * 1000;
+  let lastLeft = -1;
+  const tick = () => {
+    const ms = Math.max(0, endAt - Date.now()), left = Math.ceil(ms / 1000);
+    timer.textContent = `のこり ${left} 秒`;
+    bar.style.width = (ms / (s.seconds * 1000) * 100).toFixed(1) + '%';
+    if (left !== lastLeft) { lastLeft = left; clock.classList.toggle('hurry', left <= 10); if (left <= 5 && left > 0) sfx('tick'); }
+    if (left <= 0) submit(true);
+  };
+  word.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) submit(false); });
+  show('shiri-draw-' + k,
+    head('絵しりとり', `${k + 1}枚目：あなたの番`),
+    h('div', { class: 'row' }, clock),
+    prev ? h('figure', { class: 'shiri-prev', id: 'shiri-prev' }, partPicture(SHIRI_LAYOUT, 0, prev.ops), h('figcaption', {}, `前の絵（${prev.by.name}）`)) : null,
+    easelFor(canvas, 1),
+    toolPanel(pad),
+    h('div', { class: 'ticket' }, h('small', {}, icon('pen'), 'こたえ（ひらがな）'), word),
+    msg,
+    h('button', { class: 'btn primary go', id: 'done-btn', onclick: () => submit(false) }, icon('check'), 'できた！'),
+  );
+  tick();
+  every(tick, 250);
+}
+
+// 絵と答えが届いた：描く番の人のものだけを受けつける
+function handleShiriTurn(d, from) {
+  const s = G.shiri;
+  if (!s || s.ended || d.game !== s.id || d.k !== s.chain.length) return;
+  if (from !== s.order[d.k % s.order.length].id) { log('rejected: turn from wrong sender'); return; }
+  clearInterval(G.resend); // 次の人の絵が届いたので、自分の絵を送り直すのをやめる
+  shiriApply(d.k, cleanOps(d.ops), normWord(d.word));
+}
+
+// 1枚ぶんを記録して、〇か✕かを決める。〇なら次の番へ、✕なら終わり
+function shiriApply(k, ops, word) {
+  const s = G.shiri;
+  if (!s || s.ended || k !== s.chain.length) return;
+  const why = shiriJudge(s, k, word);
+  s.chain.push({ ops, word, by: s.order[k % s.order.length], why });
+  if (why || s.chain.length >= SHIRI_MAX) shiriEnd(); else shiriTurn();
+}
+
+// 終わりの画面：全員の絵と答えを、描いた順番にならべる。つながりが合っていれば〇、ちがえば✕
+function shiriEnd(note = '') {
+  const s = G.shiri;
+  if (!s || s.ended) return;
+  s.ended = true;
+  clearTimers();
+  G.phase = 'shiri-end';
+  G.pad = null;
+  track();
+  const good = s.chain.filter((c) => !c.why).length, cleared = good >= SHIRI_MAX;
+  sfx(cleared ? 'ready' : 'done');
+  if (cleared) confetti();
+  const items = [];
+  s.chain.forEach((c, i) => {
+    if (i) items.push(h('div', { class: 'shiri-mark' + (c.why ? ' ng' : ''), 'aria-label': c.why ? 'つながっていない' : 'つながった' }, c.why ? '✕' : '〇'));
+    items.push(h('figure', { class: 'shiri-item' + (c.why ? ' ng' : ''), title: '押すと大きくなる', onclick: (e) => e.currentTarget.classList.toggle('big') },
+      partPicture(SHIRI_LAYOUT, 0, c.ops),
+      h('figcaption', {}, h('small', {}, `${i + 1}枚目・${c.by.name}`), h('b', {}, c.word || '（こたえなし）'), c.why ? h('em', {}, '✕ ' + c.why) : null)));
+  });
+  show('shiri-end',
+    head('絵しりとり', cleared ? 'クリア！' : 'おしまい'),
+    h('div', { class: 'scorebox', id: 'shiri-score' }, h('small', {}, 'つながった絵'), h('span', { class: 'points' }, h('b', {}, String(good)), '枚')),
+    note ? h('p', { class: 'note', id: 'shiri-note' }, note) : null,
+    h('p', { class: 'note' }, s.chain.length ? '絵を押すと、大きくなります' : 'まだ1枚も届いていません'),
+    h('div', { class: 'shiri-chain', id: 'shiri-chain' }, items),
+    h('div', { class: 'toolrow' },
+      h('button', { class: 'btn primary', id: 'again-btn', onclick: lobbyScreen }, icon('again'), 'もう一回'),
+      h('button', { class: 'btn ghost', onclick: () => { leaveRoom(); titleScreen(); } }, icon('home'), 'やめる')),
   );
 }
 
@@ -772,7 +1072,7 @@ function beginRound(round) {
   G.submitted = false;
   G.ready = false;
   G.seen = {};
-  if (round.local) handoffScreen(); else introScreen();
+  if (round.local) handoffScreen(); else if (round.spectator) watchScreen(); else introScreen();
 }
 
 // お題と、自分が描くパートを見せる（シングルでは、2つ目のパートの前にも出る）
@@ -804,7 +1104,7 @@ function introScreen() {
         h('p', { class: 'note', id: 'layout-name' }, `分け方：${LAYOUT_NAMES[G.layout.id]}（${r.count}つに分ける）`))),
     h('div', { class: 'fuse', 'aria-hidden': 'true' }, h('i', { style: `animation-duration:${INTRO_MS}ms` })),
     h('p', { class: 'note' }, r.solo ? 'もう片方は、CPUが描きます（合体まで見えません）' : 'ほかのパートは、合体まで見えません'),
-    h('p', { class: 'note tip' }, (keepSample() ? 'お手本は、描いている間も見られます。' : noSample() ? '激辛：お手本は出ません。' : 'お手本の形をよく見ておぼえよう。') + '絵のはしを、金色の点線の上の2つの〇に合わせると、となりの絵とつながります'),
+    h('p', { class: 'note tip' }, (r.custom ? 'このお題には、お手本がありません。' : keepSample() ? 'お手本は、描いている間も見られます。' : noSample() ? '激辛：お手本は出ません。' : 'お手本の形をよく見ておぼえよう。') + '絵のはしを、金色の点線の上の2つの〇に合わせると、となりの絵とつながります'),
   );
   later(drawScreen, INTRO_MS);
 }
@@ -812,6 +1112,39 @@ function introScreen() {
 // キャンバスを入れるわく。形（横÷たて）に合わせて大きさが変わる
 function easelFor(canvas, ratio, scroll) {
   return h('div', { class: 'easel' + (scroll && ratio < 0.75 ? ' tall' : ''), style: `--ratio:${ratio}` }, canvas);
+}
+
+// 道具のパネル（ペン・ぬりつぶし・消しゴム、色、太さ、1つもどす、全部消す）
+function toolPanel(pad) {
+  function mark(el, group) {
+    el.closest('.tools').querySelectorAll(group).forEach((x) => { x.classList.remove('on'); x.setAttribute('aria-pressed', 'false'); });
+    el.classList.add('on');
+    el.setAttribute('aria-pressed', 'true');
+  }
+  // 道具：ペン／ぬりつぶし／消しゴム
+  const toolButtons = [['pen', 'pen', 'ペン'], ['fill', 'bucket', 'ぬりつぶし'], ['eraser', 'eraser', '消しゴム']].map(([id, ic, name]) => h('button', {
+    class: 'tool t' + (id === pad.tool ? ' on' : ''), id: 'tool-' + id, 'aria-pressed': id === pad.tool ? 'true' : 'false',
+    onclick: (e) => { pad.tool = id; mark(e.currentTarget, '.tool.t'); },
+  }, icon(ic), name));
+  const colorButtons = COLORS.map((c) => h('button', {
+    class: 'swatch' + (c === pad.color ? ' on' : ''), style: `--sw:${c}`, 'aria-label': '色 ' + COLOR_NAMES[c], title: COLOR_NAMES[c], 'aria-pressed': c === pad.color ? 'true' : 'false',
+    onclick: (e) => {
+      pad.color = c;
+      mark(e.currentTarget, '.swatch');
+      if (pad.tool === 'eraser') { pad.tool = 'pen'; mark(toolButtons[0], '.tool.t'); } // 色をえらんだら、消しゴムをやめる
+    },
+  }));
+  const widthButtons = WIDTHS.map(([name, w]) => h('button', {
+    class: 'tool w' + (w === pad.width ? ' on' : ''), 'aria-label': 'ペンの太さ ' + name, 'aria-pressed': w === pad.width ? 'true' : 'false',
+    onclick: (e) => { pad.width = w; mark(e.currentTarget, '.tool.w'); },
+  }, h('i', { class: 'dot', style: `--d:${Math.round(6 + w * 0.7)}px` }), name));
+
+  return h('div', { class: 'tools' },
+    h('div', { class: 'toolrow' }, toolButtons),
+    h('div', { class: 'toolrow' }, colorButtons),
+    h('div', { class: 'toolrow' }, widthButtons,
+      h('button', { class: 'tool', onclick: () => pad.undo() }, icon('undo'), '1つもどす'),
+      h('button', { class: 'tool', onclick: () => pad.clear() }, icon('trash'), '全部消す')));
 }
 
 function drawScreen() {
@@ -835,29 +1168,6 @@ function drawScreen() {
     if (USE_BOX && G.round === r && G.pad === pad && mine && mine.box) pad.setLimit(mine.box);
     if (USE_MARKS && G.round === r && G.pad === pad) pad.setMarks(seamMarks(G.layout, t)); // つなぎめの〇
   });
-
-  function mark(el, group) {
-    el.closest('.tools').querySelectorAll(group).forEach((x) => { x.classList.remove('on'); x.setAttribute('aria-pressed', 'false'); });
-    el.classList.add('on');
-    el.setAttribute('aria-pressed', 'true');
-  }
-  // 道具：ペン／ぬりつぶし／消しゴム
-  const toolButtons = [['pen', 'pen', 'ペン'], ['fill', 'bucket', 'ぬりつぶし'], ['eraser', 'eraser', '消しゴム']].map(([id, ic, name]) => h('button', {
-    class: 'tool t' + (id === pad.tool ? ' on' : ''), id: 'tool-' + id, 'aria-pressed': id === pad.tool ? 'true' : 'false',
-    onclick: (e) => { pad.tool = id; mark(e.currentTarget, '.tool.t'); },
-  }, icon(ic), name));
-  const colorButtons = COLORS.map((c) => h('button', {
-    class: 'swatch' + (c === pad.color ? ' on' : ''), style: `--sw:${c}`, 'aria-label': '色 ' + COLOR_NAMES[c], title: COLOR_NAMES[c], 'aria-pressed': c === pad.color ? 'true' : 'false',
-    onclick: (e) => {
-      pad.color = c;
-      mark(e.currentTarget, '.swatch');
-      if (pad.tool === 'eraser') { pad.tool = 'pen'; mark(toolButtons[0], '.tool.t'); } // 色をえらんだら、消しゴムをやめる
-    },
-  }));
-  const widthButtons = WIDTHS.map(([name, w]) => h('button', {
-    class: 'tool w' + (w === pad.width ? ' on' : ''), 'aria-label': 'ペンの太さ ' + name, 'aria-pressed': w === pad.width ? 'true' : 'false',
-    onclick: (e) => { pad.width = w; mark(e.currentTarget, '.tool.w'); },
-  }, h('i', { class: 'dot', style: `--d:${Math.round(6 + w * 0.7)}px` }), name));
 
   const endAt = Date.now() + r.seconds * 1000;
   G.endAt = endAt;
@@ -893,12 +1203,7 @@ function drawScreen() {
     h('div', { class: 'row' }, h('span', { class: 'chip gold' }, `あなたは「${regs[r.myPart].label}」`), clock),
     guide,
     easelFor(canvas, b.w / b.h),
-    h('div', { class: 'tools' },
-      h('div', { class: 'toolrow' }, toolButtons),
-      h('div', { class: 'toolrow' }, colorButtons),
-      h('div', { class: 'toolrow' }, widthButtons,
-        h('button', { class: 'tool', onclick: () => pad.undo() }, icon('undo'), '1つもどす'),
-        h('button', { class: 'tool', onclick: () => pad.clear() }, icon('trash'), '全部消す'))),
+    toolPanel(pad),
     h('p', { class: 'note', id: 'wait-text', role: 'status' }, (USE_BOX ? '明るい四角の中に描こう。' : '') + (USE_MARKS ? '金色の点線が、となりの絵とのつなぎめ。絵のはしを、2つの〇に合わせよう' : '金色の点線が、となりの絵とのつなぎめ。線を点線までのばそう')),
     h('button', { class: 'btn primary go', id: 'done-btn', onclick: submitPart }, icon('check'), 'できた！'),
   );

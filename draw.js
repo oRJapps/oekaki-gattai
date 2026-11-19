@@ -84,6 +84,14 @@ export function makeLayout(id, count) {
   };
 }
 
+// 1人で1枚ぜんぶを描くときの紙（正方形。つなぎめはない）。絵しりとりで使う
+export function oneLayout() {
+  return {
+    id: 'one', count: 1, w: 1000, h: 1000, regions: [region([[0, 0], [1000, 0], [1000, 1000], [0, 1000]], '全部')],
+    frame: { ox: 0, oy: 0, tx: 1, ty: 0, nx: 0, ny: 1 }, cuts: [], edgeLen: 1000, depth: 1000,
+  };
+}
+
 // つなぎめに沿った座標（u, v）から、絵の座標（x, y）へ
 const toWorld = (f, u, v) => [f.ox + f.tx * u + f.nx * v, f.oy + f.ty * u + f.ny * v];
 

@@ -366,3 +366,18 @@ button { font-family: var(--body); cursor: pointer; -webkit-tap-highlight-color:
 
 /* 確認用（?debug）：合体でどの方法を使ったかの表示 */
 .dbg { max-width: 760px; margin: 12px auto 0; padding: 10px 12px; background: rgba(255, 255, 255, .92); color: #1a1f3c; border-radius: 10px; font: 12px/1.6 ui-monospace, monospace; text-align: left; white-space: pre-wrap; word-break: break-all; }
+
+/* ---------- 絵しりとり ---------- */
+.shiri-chain { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+.shiri-item, .shiri-prev { margin: 0; width: min(64%, 240px); background: #fff; border: 4px solid var(--ink); border-radius: 14px; padding: 4px 4px 2px; box-shadow: 0 4px 0 var(--ink); transition: width .2s; }
+.shiri-item { cursor: zoom-in; }
+.shiri-item.big { width: 100%; cursor: zoom-out; }
+.shiri-item canvas, .shiri-prev canvas { width: 100%; display: block; border-radius: 8px; background: #fff; }
+.shiri-item figcaption, .shiri-prev figcaption { display: flex; flex-direction: column; align-items: center; color: var(--ink); text-align: center; line-height: 1.4; padding: 2px 0; overflow-wrap: anywhere; }
+.shiri-item figcaption small, .shiri-prev figcaption { font-size: 13px; font-weight: 700; }
+.shiri-item figcaption b { font-family: var(--display); font-weight: 400; font-size: 22px; }
+.shiri-item figcaption em { font-style: normal; font-weight: 700; font-size: 14px; color: #c22a2a; }
+.shiri-item.ng { border-color: #e02828; box-shadow: 0 0 0 4px #e02828; }
+.shiri-mark { font-family: var(--display); font-size: 30px; line-height: 1; color: #3ddc84; text-shadow: var(--outline); }
+.shiri-mark.ng { color: #ff5252; }
+.shiri-prev { width: min(46%, 170px); rotate: -2deg; }
