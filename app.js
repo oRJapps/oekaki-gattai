@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261125164738';
-import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261125164738';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261125164738';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261125164738';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261125164738';
-import { makeCard } from './card.js?v=20261125164738';
-import * as net from './net.js?v=20261125164738';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261125201102';
+import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261125201102';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261125201102';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261125201102';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261125201102';
+import { makeCard } from './card.js?v=20261125201102';
+import * as net from './net.js?v=20261125201102';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -172,10 +172,25 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 // 画面を入れかえる。画面の名前が変わったときだけ、登場のアニメーションをやり直す
+// 広告：タイトル画面（ホーム）の下にだけ出す。728×90 の広告なので、全体が入る広さの画面でだけ読みこむ。
+// 広告は ad.html を「わく（iframe）」の中で開く。このページの安全設定（CSP）はそのままにできる。
+// sandbox：広告が勝手にページ全体を別のサイトへ飛ばすことを止める（押したときだけ移動できる）。
+// allow-same-origin は、忍者AdMax がこれなしでは広告を出さないためつけている（その分、広告のプログラムはこのサイトの保存データにさわれる）
+function homeAd(on) {
+  const box = document.getElementById('home-ad');
+  if (!box) return;
+  const ok = on && window.matchMedia('(min-width: 760px)').matches;
+  box.hidden = !ok;
+  if (ok && !box.querySelector('iframe')) {
+    box.append(h('iframe', { src: 'ad.html', title: '広告', width: 728, height: 90, scrolling: 'no', sandbox: 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation' }));
+  }
+}
+
 function show(screen, ...nodes) {
   $app.replaceChildren(...nodes.filter((n) => n != null && n !== false));
   // 描く画面：1画面に収めて、指でさわってもページが動かないようにする（style.css の html.fit）
   document.documentElement.classList.toggle('fit', /^(draw|shiri-draw)/.test(screen));
+  homeAd(screen === 'title');
   if ($app.dataset.screen !== screen) {
     $app.dataset.screen = screen;
     $app.classList.remove('enter');
@@ -238,6 +253,7 @@ function titleScreen() {
       card('#ffc928', icon('people'), 'みんなで', '1台を順番に回して描く', go(() => levelScreen('local')))),
     h('p', { class: 'status ' + (net.online ? 'on' : 'off') }, h('i', {}),
       net.online ? 'オンライン：みんなとつながります' : 'お試しモード：同じブラウザの別タブ同士だけつながります'),
+    h('p', { class: 'guide-link' }, h('a', { href: '../guide.html', target: '_top' }, '遊び方・利用説明を見る')),
   );
   animateMascot(mascot);
 }
