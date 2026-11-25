@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261125154806';
-import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261125154806';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261125154806';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261125154806';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261125154806';
-import { makeCard } from './card.js?v=20261125154806';
-import * as net from './net.js?v=20261125154806';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261125164738';
+import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261125164738';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261125164738';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261125164738';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261125164738';
+import { makeCard } from './card.js?v=20261125164738';
+import * as net from './net.js?v=20261125164738';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);

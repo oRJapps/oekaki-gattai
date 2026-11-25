@@ -441,3 +441,37 @@ html.fit .row .sample.big figcaption, html.fit .row .shiri-prev.big figcaption {
   html.fit #app:not(.waiting) > .note { display: none; }
   html.fit #app > .btn { margin-top: 2px; }
 }
+
+/* ---------- 描く画面：スマホで、キャンバスをできるだけ大きくする ---------- */
+/* まわりのもの（お題、説明の文、ボタン、わく）を小さくして、あいた分をキャンバスにまわす */
+html.fit #app { padding: 6px 6px 8px; gap: 6px; }
+html.fit .board { width: calc(100% - 62px); min-height: 42px; padding: 2px 10px 4px; }
+html.fit #app:not(.waiting) > .note { display: none; } /* 説明の文は、お題の画面で見せてある。待っている間だけ出す */
+html.fit .btn.primary { font-size: 17px; padding: 5px 30px; }
+html.fit #app > .stage { padding-top: 8px; }
+html.fit .stage .easel { width: min(100%, calc((100cqh - 18px) * var(--ratio, 1) + 12px)); border-width: 3px; padding: 3px; border-radius: 12px; box-shadow: 0 4px 0 var(--ink); }
+html.fit .stage .easel::before { top: -8px; height: 12px; }
+html.fit .pad { border-radius: 7px; }
+/* 絵しりとり：見出しを1行にする。こたえのらんも1行にする */
+html.fit .head { flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; gap: 2px 10px; width: calc(100% - 62px); align-self: flex-start; min-height: 42px; }
+html.fit .head .ribbon { font-size: 17px; padding: 1px 12px; border-width: 3px; box-shadow: 0 3px 0 var(--ink); rotate: none; }
+html.fit .head .lead { font-size: 13px; }
+html.fit .ticket { flex-direction: row; gap: 8px; padding: 1px 10px; border-width: 3px; border-radius: 12px; box-shadow: 0 3px 0 var(--ink); rotate: none; max-width: none; }
+html.fit .ticket small { flex: none; }
+html.fit .ticket .input { flex: 1 1 auto; text-align: left; }
+/* 横向き：お題と残り時間を1段にまとめる。道具の列を細くして、キャンバスを広くする */
+@media (orientation: landscape) and (max-height: 620px) {
+  html.fit #app { grid-template-columns: minmax(0, 1fr) minmax(230px, 272px); gap: 4px 8px; }
+  html.fit .row .sample, html.fit .row .shiri-prev { width: 40px; }
+  html.fit .tools { padding: 4px 4px 6px; gap: 4px; }
+  html.fit .tool { min-height: 30px; }
+  html.fit .btn.primary { padding: 3px 26px; }
+  html.fit #app > .board, html.fit #app > .head { grid-column: 1; grid-row: 1; width: 100%; }
+  html.fit #app > .row { grid-column: 2; grid-row: 1; padding-right: 54px; justify-content: flex-start; }
+  html.fit #app > .stage { grid-column: 1; grid-row: 2 / span 5; height: calc(100dvh - 72px); min-height: 150px; }
+  html.fit .chip { display: none; } /* 「あなたは◯◯」は、お題の画面で見せてある */
+  html.fit .swatch { width: 26px; height: 26px; }
+  html.fit .toolrow { gap: 4px; }
+  html.fit .ticket { flex-direction: column; gap: 0; }
+  html.fit .ticket .input { text-align: center; width: 100%; }
+}
