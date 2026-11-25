@@ -381,3 +381,63 @@ button { font-family: var(--body); cursor: pointer; -webkit-tap-highlight-color:
 .shiri-mark { font-family: var(--display); font-size: 30px; line-height: 1; color: #3ddc84; text-shadow: var(--outline); }
 .shiri-mark.ng { color: #ff5252; }
 .shiri-prev { width: min(46%, 170px); rotate: -2deg; }
+
+/* ---------- 描く画面を、1画面に収める（スマホ・タブレットで、ページが動かないようにする） ---------- */
+/* html.fit は、描く画面のときだけつく（app.js の show）。ページ全体のスクロール・引っぱり・拡大を止める */
+#app { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#app input { -webkit-user-select: text; user-select: text; }
+button, .card, .swatch, .tool { touch-action: manipulation; } /* 2回タップで、画面が拡大しないようにする */
+html.fit, html.fit body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+html.fit body { min-height: 0; }
+html.fit .copyright { display: none; }
+html.fit #app {
+  flex: 1 1 auto; height: 100vh; height: 100dvh; min-height: 0; padding: 8px 10px 10px; gap: 8px;
+  overflow-x: hidden; overflow-y: auto; overscroll-behavior: none; touch-action: pan-y; /* 収まらない小さな画面では、たてにだけ動かせる */
+}
+html.fit #app > * { flex: 0 0 auto; }
+/* お題：小さくして、右上の音のボタンをよける */
+html.fit .board { width: calc(100% - 58px); align-self: flex-start; padding: 4px 12px 6px; border-width: 4px; border-radius: 16px; box-shadow: 0 0 0 3px var(--ink), 0 5px 0 var(--ink); flex-direction: row; justify-content: center; align-items: center; flex-wrap: wrap; gap: 0 10px; min-height: 48px; }
+html.fit .board::before, html.fit .board::after { display: none; }
+html.fit .board small { font-size: 13px; letter-spacing: .1em; padding: 0; }
+html.fit .board b, html.fit .board.small b { font-size: clamp(16px, calc(74vw / var(--len, 4)), 28px); text-shadow: var(--outline); line-height: 1.2; }
+html.fit .board .dir { font-size: 13px; padding: 0 10px; margin: 0; }
+html.fit .head { gap: 2px; }
+html.fit .head .ribbon { font-size: 20px; padding: 2px 16px; }
+html.fit .head .lead { font-size: 14px; }
+html.fit .row { gap: 6px; }
+html.fit .chip { padding: 2px 10px; font-size: 13px; }
+html.fit .clock { padding: 3px 10px 3px 8px; font-size: 14px; }
+/* キャンバス：あいている高さいっぱいに広げる。たても横も、はみ出さない大きさにする */
+.stage { width: 100%; display: grid; place-items: center; }
+html.fit #app > .stage { flex: 1 1 0; min-height: 150px; padding-top: 10px; container-type: size; }
+html.fit .stage .easel { width: min(100%, calc((100cqh - 24px) * var(--ratio, 1) + 18px)); border-width: 4px; padding: 5px; border-radius: 14px; box-shadow: 0 5px 0 var(--ink); }
+html.fit .stage .easel::before { top: -10px; width: 60px; height: 14px; border-width: 3px; }
+/* 道具：小さくまとめる */
+html.fit .tools { gap: 6px; padding: 6px 6px 8px; border-width: 3px; border-radius: 14px; box-shadow: 0 4px 0 var(--ink); }
+html.fit .toolrow { gap: 4px; }
+html.fit .tool { font-size: 12px; padding: 3px 6px; min-height: 34px; border-radius: 10px; box-shadow: 0 3px 0 var(--ink); gap: 3px; }
+html.fit .tool .dot { width: calc(var(--d) * .75); height: calc(var(--d) * .75); }
+html.fit .swatch { width: clamp(20px, 5.9vw, 32px); height: clamp(20px, 5.9vw, 32px); border-width: 3px; }
+html.fit .swatch.on { scale: 1.16; box-shadow: 0 0 0 3px #fff; }
+html.fit .ticket { padding: 2px 10px; }
+html.fit .ticket small { font-size: 12px; }
+html.fit .ticket .input { font-size: 17px; padding: 4px 8px; }
+html.fit .note { font-size: 12px; line-height: 1.35; }
+html.fit .btn.primary { font-size: 18px; padding: 8px 32px; box-shadow: 0 4px 0 var(--ink); }
+/* お手本と「前の絵」：上の段に小さく置く。押すと、画面のまんなかに大きく出る（もう一度押すと、もどる） */
+html.fit .row .sample, html.fit .row .shiri-prev { width: 58px; margin: 0; rotate: none; padding: 2px; border-width: 3px; border-radius: 10px; box-shadow: 0 3px 0 var(--ink); cursor: zoom-in; animation: none; transition: none; }
+html.fit .row .sample figcaption, html.fit .row .shiri-prev figcaption { display: none; }
+html.fit .row .sample.big, html.fit .row .shiri-prev.big { position: fixed; z-index: 35; left: 50%; top: 50%; translate: -50% -50%; width: min(86vw, 70vh); padding: 6px; border-width: 5px; border-radius: 16px; box-shadow: 0 0 0 100vmax rgba(8, 10, 34, .75); cursor: zoom-out; }
+html.fit .row .sample.big figcaption, html.fit .row .shiri-prev.big figcaption { display: block; }
+/* 横向き（高さが小さい画面）：キャンバスを左、道具を右にならべる */
+@media (orientation: landscape) and (max-height: 620px) {
+  html.fit #app { max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 300px); grid-auto-rows: min-content; align-content: start; align-items: center; justify-items: center; gap: 6px 10px; }
+  html.fit #app > .board, html.fit #app > .head, html.fit #app > .row { grid-column: 1 / -1; }
+  html.fit #app > .board { justify-self: start; }
+  html.fit #app > .stage { grid-column: 1; grid-row: 3 / span 4; align-self: stretch; height: calc(100dvh - 116px); min-height: 150px; }
+  html.fit #app > .tools, html.fit #app > .ticket, html.fit #app > .note, html.fit #app > .btn { grid-column: 2; }
+  html.fit .swatch { width: 20px; height: 20px; }
+  html.fit .toolrow { gap: 3px; }
+  html.fit #app:not(.waiting) > .note { display: none; }
+  html.fit #app > .btn { margin-top: 2px; }
+}

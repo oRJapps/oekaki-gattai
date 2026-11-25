@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261119172837';
-import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261119172837';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261119172837';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261119172837';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261119172837';
-import { makeCard } from './card.js?v=20261119172837';
-import * as net from './net.js?v=20261119172837';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261125154806';
+import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261125154806';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261125154806';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261125154806';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261125154806';
+import { makeCard } from './card.js?v=20261125154806';
+import * as net from './net.js?v=20261125154806';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -174,6 +174,8 @@ function h(tag, attrs = {}, ...kids) {
 // 画面を入れかえる。画面の名前が変わったときだけ、登場のアニメーションをやり直す
 function show(screen, ...nodes) {
   $app.replaceChildren(...nodes.filter((n) => n != null && n !== false));
+  // 描く画面：1画面に収めて、指でさわってもページが動かないようにする（style.css の html.fit）
+  document.documentElement.classList.toggle('fit', /^(draw|shiri-draw)/.test(screen));
   if ($app.dataset.screen !== screen) {
     $app.dataset.screen = screen;
     $app.classList.remove('enter');
@@ -925,9 +927,10 @@ function shiriDraw() {
   word.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) submit(false); });
   show('shiri-draw-' + k,
     head('絵しりとり', `${k + 1}枚目：あなたの番`),
-    h('div', { class: 'row' }, clock),
-    prev ? h('figure', { class: 'shiri-prev', id: 'shiri-prev' }, partPicture(SHIRI_LAYOUT, 0, prev.ops), h('figcaption', {}, `前の絵（${prev.by.name}）`)) : null,
-    easelFor(canvas, 1),
+    h('div', { class: 'row' }, clock,
+      prev ? h('figure', { class: 'shiri-prev', id: 'shiri-prev', title: '押すと大きくなる', onclick: (e) => e.currentTarget.classList.toggle('big') },
+        partPicture(SHIRI_LAYOUT, 0, prev.ops), h('figcaption', {}, `前の絵（${prev.by.name}）`)) : null),
+    h('div', { class: 'stage', style: '--ratio:1' }, easelFor(canvas, 1)),
     toolPanel(pad),
     h('div', { class: 'ticket' }, h('small', {}, icon('pen'), 'こたえ（ひらがな）'), word),
     msg,
@@ -1140,11 +1143,11 @@ function toolPanel(pad) {
   }, h('i', { class: 'dot', style: `--d:${Math.round(6 + w * 0.7)}px` }), name));
 
   return h('div', { class: 'tools' },
-    h('div', { class: 'toolrow' }, toolButtons),
+    h('div', { class: 'toolrow' }, toolButtons,
+      h('button', { class: 'tool', onclick: () => pad.clear() }, icon('trash'), '全部消す')),
     h('div', { class: 'toolrow' }, colorButtons),
     h('div', { class: 'toolrow' }, widthButtons,
-      h('button', { class: 'tool', onclick: () => pad.undo() }, icon('undo'), '1つもどす'),
-      h('button', { class: 'tool', onclick: () => pad.clear() }, icon('trash'), '全部消す')));
+      h('button', { class: 'tool', onclick: () => pad.undo() }, icon('undo'), '1つもどす')));
 }
 
 function drawScreen() {
@@ -1200,9 +1203,8 @@ function drawScreen() {
   const b = regs[r.myPart].bbox;
   show('draw-' + r.myPart,
     board(r.topic, true),
-    h('div', { class: 'row' }, h('span', { class: 'chip gold' }, `あなたは「${regs[r.myPart].label}」`), clock),
-    guide,
-    easelFor(canvas, b.w / b.h),
+    h('div', { class: 'row' }, h('span', { class: 'chip gold' }, `あなたは「${regs[r.myPart].label}」`), clock, guide),
+    h('div', { class: 'stage', style: `--ratio:${b.w / b.h}` }, easelFor(canvas, b.w / b.h)),
     toolPanel(pad),
     h('p', { class: 'note', id: 'wait-text', role: 'status' }, (USE_BOX ? '明るい四角の中に描こう。' : '') + (USE_MARKS ? '金色の点線が、となりの絵とのつなぎめ。絵のはしを、2つの〇に合わせよう' : '金色の点線が、となりの絵とのつなぎめ。線を点線までのばそう')),
     h('button', { class: 'btn primary go', id: 'done-btn', onclick: submitPart }, icon('check'), 'できた！'),
