@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261126113415';
-import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261126113415';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261126113415';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261126113415';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261126113415';
-import { makeCard } from './card.js?v=20261126113415';
-import * as net from './net.js?v=20261126113415';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261126113949';
+import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261126113949';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261126113949';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261126113949';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261126113949';
+import { makeCard } from './card.js?v=20261126113949';
+import * as net from './net.js?v=20261126113949';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -180,18 +180,23 @@ function homeAd(on) {
   const box = document.getElementById('home-ad');
   if (!box) return;
   // 遊び方ページの中に埋めこまれているときは、広告を出さない（そのページが自分の広告を持っている）
-  const ok = on && window.top === window.self;
+  const ok = on && window.top === window.self && !box.dataset.off;
   box.hidden = !ok;
-  if (!ok) return;
-  // 広い画面：728×90（ad.html）。せまい画面：スマホ用（ad-sp.html。わくの中では 320×50 が1枚出る）
-  const kind = window.matchMedia('(min-width: 760px)').matches ? 'pc' : 'sp';
-  if (box.dataset.kind === kind) return;
-  box.dataset.kind = kind;
-  box.className = 'home-ad ' + kind;
-  const old = box.querySelector('iframe');
-  if (old) old.remove();
-  const size = kind === 'pc' ? { src: 'ad.html', width: 728, height: 90 } : { src: 'ad-sp.html', width: 320, height: 50 };
-  box.append(h('iframe', { ...size, title: '広告', scrolling: 'no', sandbox: 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation' }));
+  if (!ok || box.querySelector('iframe')) return;
+  // ad.html のタグは、忍者AdMax が機器で出し分ける（パソコン：728×90、スマホ：320×50）。読みこんだあと、その大きさにわくを合わせる
+  const f = h('iframe', { src: 'ad.html', title: '広告', width: 320, height: 50, scrolling: 'no', sandbox: 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation' });
+  // 広告の大きさが分かるまで、0.2秒ごとに見にいく（最大15秒）
+  let tries = 0;
+  const fit = () => {
+    let a = null;
+    try { a = f.contentWindow.admaxbanner; } catch { /* まだ読めない */ }
+    if (!a) { if (++tries < 75 && f.isConnected) setTimeout(fit, 200); return; }
+    const w = a.width || 320, hh = a.height || 50;
+    if (w > document.documentElement.clientWidth) { box.dataset.off = '1'; box.hidden = true; f.remove(); return; } // 画面に入らない大きさの広告は、出さない（切れた広告を見せない）
+    f.width = w; f.height = hh;
+  };
+  setTimeout(fit, 200);
+  box.append(f);
 }
 
 function show(screen, ...nodes) {
