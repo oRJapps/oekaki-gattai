@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261125201102';
-import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261125201102';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261125201102';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261125201102';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261125201102';
-import { makeCard } from './card.js?v=20261125201102';
-import * as net from './net.js?v=20261125201102';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261126113415';
+import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261126113415';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261126113415';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261126113415';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261126113415';
+import { makeCard } from './card.js?v=20261126113415';
+import * as net from './net.js?v=20261126113415';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -179,11 +179,19 @@ function h(tag, attrs = {}, ...kids) {
 function homeAd(on) {
   const box = document.getElementById('home-ad');
   if (!box) return;
-  const ok = on && window.matchMedia('(min-width: 760px)').matches;
+  // 遊び方ページの中に埋めこまれているときは、広告を出さない（そのページが自分の広告を持っている）
+  const ok = on && window.top === window.self;
   box.hidden = !ok;
-  if (ok && !box.querySelector('iframe')) {
-    box.append(h('iframe', { src: 'ad.html', title: '広告', width: 728, height: 90, scrolling: 'no', sandbox: 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation' }));
-  }
+  if (!ok) return;
+  // 広い画面：728×90（ad.html）。せまい画面：スマホ用（ad-sp.html。わくの中では 320×50 が1枚出る）
+  const kind = window.matchMedia('(min-width: 760px)').matches ? 'pc' : 'sp';
+  if (box.dataset.kind === kind) return;
+  box.dataset.kind = kind;
+  box.className = 'home-ad ' + kind;
+  const old = box.querySelector('iframe');
+  if (old) old.remove();
+  const size = kind === 'pc' ? { src: 'ad.html', width: 728, height: 90 } : { src: 'ad-sp.html', width: 320, height: 50 };
+  box.append(h('iframe', { ...size, title: '広告', scrolling: 'no', sandbox: 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation' }));
 }
 
 function show(screen, ...nodes) {
