@@ -5,13 +5,13 @@
 //   フレ（フレンド）→ カギ（入力）→ 対戦
 //   フレ（フレンド）→ 部屋（作る）→ 難易度 A/B/C → カギ（発行）
 
-import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261126113949';
-import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261126113949';
-import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261126113949';
-import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261126113949';
-import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261126113949';
-import { makeCard } from './card.js?v=20261126113949';
-import * as net from './net.js?v=20261126113949';
+import { LEVELS, WIDE_TOPICS, nextTopic, markTopic, parseTopic, sampleFile, topicDir, sampleFlip } from './topics.js?v=20261126114340';
+import { loadSample, loadAlternates, COLOR_LIST } from './samples.js?v=20261126114340';
+import { Pad, makeLayout, pickLayout, layoutsFor, drawLayoutPreview, drawSample, LAYOUT_NAMES, startReveal, similarity, partPicture, samplePartLayers, scoreCVDB, seamMarks, oneLayout } from './draw.js?v=20261126114340';
+import { sfx, confetti, fireworks, jackpot, stopFx, startBackdrop, isMuted, setMuted } from './fx.js?v=20261126114340';
+import { createIdentity, idOf, importKey, verify } from './sec.js?v=20261126114340';
+import { makeCard } from './card.js?v=20261126114340';
+import * as net from './net.js?v=20261126114340';
 
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -189,7 +189,7 @@ function homeAd(on) {
   let tries = 0;
   const fit = () => {
     let a = null;
-    try { a = f.contentWindow.admaxbanner; } catch { /* まだ読めない */ }
+    try { const el = f.contentDocument.querySelector('[id^="admax-banner"]'); if (el && el.offsetWidth > 0 && el.offsetHeight > 0) a = { width: el.offsetWidth, height: el.offsetHeight }; } catch { /* まだ読めない */ }
     if (!a) { if (++tries < 75 && f.isConnected) setTimeout(fit, 200); return; }
     const w = a.width || 320, hh = a.height || 50;
     if (w > document.documentElement.clientWidth) { box.dataset.off = '1'; box.hidden = true; f.remove(); return; } // 画面に入らない大きさの広告は、出さない（切れた広告を見せない）
